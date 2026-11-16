@@ -1,0 +1,10 @@
+.e2e/
+.DS_Store
+.venv/
+__pycache__/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+tests/prometheus/.rendered/
+__snapshot__/
+.claude/

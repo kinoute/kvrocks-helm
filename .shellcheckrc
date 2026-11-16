@@ -1,0 +1,4 @@
+external-sources=true
+source-path=SCRIPTDIR
+# `local` is not POSIX but both dash and busybox ash support it.
+disable=SC3043
