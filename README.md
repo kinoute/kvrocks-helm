@@ -102,7 +102,7 @@ For a release named `db`:
 | --- | --- |
 | Writes, always the master | `db-kvrocks:6379` |
 | Reads, any ready pod (may be slightly stale) | `db-kvrocks-read:6379` |
-| Sentinel, for clients that speak it (master name `kvrocks`) | `db-kvrocks-headless:26379` |
+| Sentinel, for clients that speak it (master name `kvrocks`), not with TLS | `db-kvrocks-headless:26379` |
 
 ### Main values
 
@@ -120,6 +120,29 @@ Every value is documented in [`helm/kvrocks/values.yaml`](helm/kvrocks/values.ya
 | `metrics.serviceMonitor.enabled` | `false` | Scrapes the exporters and HAProxy with the Prometheus Operator |
 | `metrics.prometheusRule.enabled` | `false` | Installs the alerts |
 | `networkPolicy.enabled` | `false` | Restricts who can reach the pods |
+| `tls.enabled` | `false` | Clients connect over TLS, with a client certificate by default, see [TLS](#tls) |
+
+### TLS
+
+TLS covers the clients only. Kvrocks takes them on `port` (6379) over TLS, and with `tls.authClients` (the default) only with a certificate signed by the CA. Everything between the pods of the release stays in clear on `tls.internalPort` (6666): replication, Sentinel, the checks of HAProxy, the fencing and the exporter.
+
+```yaml
+tls:
+  enabled: true
+  existingSecret: db-kvrocks-tls # kubernetes.io/tls: tls.crt and tls.key
+  ca:
+    secret: db-kvrocks-ca # the CA that signed the client certificates
+    key: ca.crt
+```
+
+- **The server certificate must cover the names clients use**: `db-kvrocks` and `db-kvrocks-read`, in their short and `.<namespace>.svc.cluster.local` forms, plus any name used from outside the cluster. HAProxy passes the TLS connection through without opening it, so clients see the certificate of Kvrocks whichever endpoint they use. Most clients check the name: one that connects to a given pod needs `*.db-kvrocks-headless.<namespace>.svc.cluster.local` as well. The `serverAuth` usage is enough.
+- **Python 3.13 and later verify strictly.** They refuse, with `certificate verify failed`, a certificate without an Authority Key Identifier or a CA without a key usage. A company PKI usually sets both, a quick `openssl` one-liner often does not. `openssl verify -x509_strict -CAfile ca.crt tls.crt` tells beforehand.
+- **The port in clear cannot be closed.** Kvrocks always listens in clear as well, so the chart moves that port to `tls.internalPort` and installs a NetworkPolicy, even with `networkPolicy.enabled: false`, that opens it to the pods of the release only. This needs a network plugin that enforces NetworkPolicy. Without one, the port stays reachable from the cluster, behind the password.
+- **Sentinel is not available to clients.** It speaks in clear, so the same NetworkPolicy keeps it inside the release. Clients go through the write endpoint.
+- **Renewing a certificate restarts the pods.** Kvrocks does not notice that its files changed. With `tls.reloader: true`, the StatefulSet carries the annotation of [Reloader](https://github.com/stakater/Reloader), which rolls the pods when either Secret changes. A rolling update hands the master over without losing a write. Without Reloader, run `kubectl rollout restart statefulset/db-kvrocks` after the renewal.
+- **`helm test` needs a client certificate** under `tls.authClients`: a `kubernetes.io/tls` Secret named in `tls.clientSecret`. Without it, the test is not installed.
+
+The scenario `tls_clients` checks that a client with a certificate from the CA gets in, and that clients without a certificate, with a certificate from another CA, in clear, or on the port in clear from outside the release do not. Every other scenario runs with TLS on too, except in `make e2e-quick`.
 
 ### Moving the master before maintenance
 
@@ -221,7 +244,7 @@ Three more scenarios write 2 000 keys, then kill every node at once and check th
 - **A rolling update can move the master several times.** Kubernetes restarts the pods from the highest ordinal down, and Sentinel may hand the role to the next pod to restart. Each move pauses writes for about 3 s without losing any, but a rolling update can take up to three of them.
 - **Password rotation is not automatic.** Changing the Secret restarts nothing, and pods that restart later with the new password can no longer talk to the others. Follow [Rotating the password](#rotating-the-password).
 - **Changing `replicaCount` is not handled.** Scaling down in particular can remove the pod that is the master.
-- **No TLS yet.** Neither for clients nor for replication. It is the next thing I plan to add.
+- **TLS stops at the clients.** Replication and Sentinel run in clear inside the release. Encrypting them needs certificates that also carry the `clientAuth` usage: Kvrocks presents its server certificate as a client certificate when it replicates, and a `serverAuth`-only certificate is refused. It is the next thing I plan to add.
 - **Not tested behind a service mesh.**
 - **External replicas can be promoted.** Anything that attaches to the master as a replica, a backup job for instance, is seen by Sentinel as a candidate. Start it with `slave-priority 0`.
 - **`connected_slaves` over-counts.** Kvrocks keeps counting a replica whose pod is gone until TCP gives up on it, minutes later. The alerts look at the replicas instead.
