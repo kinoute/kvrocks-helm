@@ -22,8 +22,12 @@ RUN_ID=$(date +%s)
 # production, unless E2E_TLS=0.
 E2E_TLS=${E2E_TLS:-1}
 HELM_VALUES=(--values "$E2E_DIR/values.yaml")
+# The port of the traffic inside the release: replication, Sentinel, the checks. TLS moves it
+# off the client port.
+INTERNAL_PORT=6379
 if [ "$E2E_TLS" = 1 ]; then
   HELM_VALUES+=(--values "$E2E_DIR/values-tls.yaml")
+  INTERNAL_PORT=6666
 fi
 CERTS_DIR="$REPO_ROOT/.e2e/certs"
 CLIENT_POD=kv-client
@@ -404,7 +408,7 @@ isolate_from_peers() { # $1: ordinal
 # Stops a replica from receiving the replication stream. Sentinel still reaches it and
 # sees it alive, so it stays a candidate for promotion.
 cut_replication() { # $1: replica ordinal, $2: master ordinal
-  drop_traffic "$(node_of "$1")" -s "$(pod_ip "$1")" -d "$(pod_ip "$2")" -p tcp --dport 6379
+  drop_traffic "$(node_of "$1")" -s "$(pod_ip "$1")" -d "$(pod_ip "$2")" -p tcp --dport "$INTERNAL_PORT"
 }
 
 # Full syncs logged by the running Kvrocks containers. A restarted container starts from 0.

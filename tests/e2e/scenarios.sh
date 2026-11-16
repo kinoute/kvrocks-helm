@@ -11,8 +11,6 @@ MAX_PLANNED_WRITE_GAP_SECONDS=${MAX_PLANNED_WRITE_GAP_SECONDS:-10}
 # Sentinel waits 10 s before declaring the master down, then promotes a replica.
 MAX_CRASH_WRITE_GAP_SECONDS=${MAX_CRASH_WRITE_GAP_SECONDS:-40}
 OUTAGE_KEYS=2000
-# The port Kvrocks keeps in clear for the traffic inside the release, with TLS.
-INTERNAL_PORT=6666
 EMPTY_POD_HEAD_START_SECONDS=180
 DNS_OUTAGE_SECONDS=60
 # An isolated master must stop taking writes within this delay.
