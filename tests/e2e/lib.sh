@@ -223,8 +223,13 @@ describe_cluster() {
     kubectl -n kube-system logs "$pod" --previous --tail=6 2>&1 | sed "s|^|    $pod (previous): |" | cut -c1-200
   done
   k get events --sort-by=.lastTimestamp 2>&1 | grep -E 'Unhealthy|BackOff|Killing|Failed' | tail -12 | cut -c1-200
-  # A handover that gave up leaves its reason in a FailedPreStopHook event.
+  # A handover that gave up leaves a FailedPreStopHook event, and its reason on the volume:
+  # hook output never reaches the container logs.
   k get events --field-selector reason=FailedPreStopHook -o custom-columns=POD:.involvedObject.name,MESSAGE:.message --no-headers 2>&1 | tail -5
+  for ordinal in $(ordinals); do
+    k exec "$(pod_name "$ordinal")" -c kvrocks -- tail -n 6 /var/lib/kvrocks/handover.log 2>/dev/null |
+      sed "s|^|    $(pod_name "$ordinal")/handover.log: |" | cut -c1-220
+  done
   for ordinal in $(ordinals); do
     printf 'pod %s: role=%s master_link=%s sentinel_master=%s\n' "$ordinal" \
       "$(kv_exec "$ordinal" kvrocks 'kv_info_field localhost role')" \
