@@ -11,7 +11,7 @@ MAX_PLANNED_WRITE_GAP_SECONDS=${MAX_PLANNED_WRITE_GAP_SECONDS:-10}
 # Sentinel waits 10 s before declaring the master down, then promotes a replica.
 MAX_CRASH_WRITE_GAP_SECONDS=${MAX_CRASH_WRITE_GAP_SECONDS:-40}
 OUTAGE_KEYS=2000
-EMPTY_POD_HEAD_START_SECONDS=40
+EMPTY_POD_HEAD_START_SECONDS=180
 DNS_OUTAGE_SECONDS=60
 # An isolated master must stop taking writes within this delay.
 FENCE_DEADLINE_SECONDS=5
@@ -379,7 +379,7 @@ scenario_stale_master_starts_first() {
 # Pod 0 was the master, lost its disk during a full outage and comes back first, empty.
 # It must not start as an empty master: its peers would copy that emptiness.
 scenario_empty_first_pod_after_outage() {
-  local first_node startup_log
+  local first_node deadline
   make_master 0
   write_keys beforeloss "$OUTAGE_KEYS"
   wait_healthy
@@ -391,11 +391,14 @@ scenario_empty_first_pod_after_outage() {
   k delete pvc "data-$(pod_name 0)" --wait=false >/dev/null
   k delete pod "$(pod_name 0)" --force --grace-period=0 >/dev/null 2>&1
   start_nodes "$first_node"
-  # A head start for the empty pod, alone, before any peer can tell it who holds the data.
-  sleep "$EMPTY_POD_HEAD_START_SECONDS"
-  startup_log=$(k logs "$(pod_name 0)" -c kvrocks)
-  grep -q 'empty volume: waiting' <<<"$startup_log" ||
-    fail "empty_first_pod_after_outage: the empty pod is not holding back"
+  # The empty pod starts alone, before any peer can tell it who holds the data. The peers
+  # only come back once it is seen holding back: a new volume and a cold start take long.
+  deadline=$((SECONDS + EMPTY_POD_HEAD_START_SECONDS))
+  until grep -q 'empty volume: waiting' <<<"$(k logs "$(pod_name 0)" -c kvrocks 2>/dev/null)"; do
+    [ "$SECONDS" -lt "$deadline" ] ||
+      fail "empty_first_pod_after_outage: the empty pod is not holding back"
+    sleep 2
+  done
   # shellcheck disable=SC2046
   start_nodes $(worker_nodes)
   wait_healthy
