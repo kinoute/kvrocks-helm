@@ -257,6 +257,7 @@ Three more scenarios write 2 000 keys, then kill every node at once and check th
 make test        # lint, Kubernetes schemas, helm-unittest, script tests, alert rules, load generator
 make e2e-quick   # handover, rolling update and master crash on a local Kind cluster
 make e2e         # every failure scenario
+make e2e-cluster CONTEXT=<kube context>   # the scenarios that leave the nodes alone, on a real cluster
 ```
 
 `make test` needs `helm` with the `unittest` and `schema` plugins, `shellcheck`, `kubeconform`, `promtool`, `yq`, `uv` and `docker`. The end-to-end targets also need `kind`, `kubectl` and `jq`.
@@ -264,6 +265,12 @@ make e2e         # every failure scenario
 The scripts that run in the pods have unit tests of their own in [`tests/scripts`](tests/scripts): each runs in the image it runs in production, dash for Kvrocks and busybox for Sentinel, against a fake `redis-cli` that plays a whole cluster, unreachable hosts and DNS outages included.
 
 The end-to-end scenarios break something while 4 clients write through HAProxy over persistent connections, then read every acknowledged key back from the write endpoint and from each pod. They live in [`tests/e2e/scenarios.sh`](tests/e2e/scenarios.sh).
+
+On a real cluster, `make e2e-cluster` skips every scenario that kills or cuts off a node, drains one or stops cluster DNS. The rest runs in the namespace `kvrocks-ha-test` (`E2E_NAMESPACE`), deleted at the end unless `KEEP_CLUSTER=1`, and the load generator comes from `ghcr.io/kinoute/kvrocks-e2e-loadgen` (`LOADGEN_IMAGE`). `large_dataset`, which only runs when named, writes `E2E_DATASET_GIB` of data shaped like a production workload, then times a full sync and a restart on it. Size the volumes for it with `E2E_VOLUME_SIZE`:
+
+```bash
+E2E_CONTEXT=<kube context> E2E_DATASET_GIB=10 E2E_VOLUME_SIZE=40Gi tests/e2e/run.sh install large_dataset
+```
 
 ## Sources
 
