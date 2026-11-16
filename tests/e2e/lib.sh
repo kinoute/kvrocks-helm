@@ -321,6 +321,16 @@ worker_nodes() {
   kubectl get nodes -l '!node-role.kubernetes.io/control-plane' -o name | sed 's|node/||'
 }
 
+# The master the Sentinel of a pod names, once it answers at all.
+wait_for_sentinel_answer() { # $1: ordinal
+  local deadline=$((SECONDS + HEALTHY_TIMEOUT_SECONDS)) named=""
+  while [ -z "$named" ] && [ "$SECONDS" -lt "$deadline" ]; do
+    named=$(kv_exec "$1" sentinel 'sentinel_master localhost' || true)
+    [ -n "$named" ] || sleep 2
+  done
+  printf '%s\n' "$named"
+}
+
 wait_until_pod_answers() { # $1: ordinal
   local deadline=$((SECONDS + HEALTHY_TIMEOUT_SECONDS))
   until [ -n "$(kv_exec "$1" kvrocks 'kv_info_field localhost role')" ]; do

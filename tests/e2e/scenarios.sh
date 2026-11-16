@@ -350,7 +350,7 @@ scenario_full_outage() {
 # Sentinel still names it as master; the pods that hold the newer data must not follow it,
 # or they would replace their data with its older copy.
 scenario_stale_master_starts_first() {
-  local old_master old_node new_master
+  local old_master old_node new_master named
   old_master=$(current_master)
   old_node=$(node_of "$old_master")
   docker kill "$old_node" >/dev/null
@@ -364,8 +364,10 @@ scenario_stale_master_starts_first() {
   docker start "$old_node" >/dev/null
   wait_until_pod_answers "$old_master"
   # The scenario only means something if the outdated Sentinel is there to mislead the others.
-  [ "$(kv_exec "$old_master" sentinel 'sentinel_master localhost')" = "$(pod_fqdn "$old_master")" ] ||
-    fail "stale_master_starts_first: the outdated Sentinel does not name the old master"
+  # It restarts with its pod, possibly after Kvrocks already answers: give it some time.
+  named=$(wait_for_sentinel_answer "$old_master")
+  [ "$named" = "$(pod_fqdn "$old_master")" ] ||
+    fail "stale_master_starts_first: the outdated Sentinel names [$named], not the old master"
   # shellcheck disable=SC2046
   docker start $(worker_nodes) >/dev/null
   wait_healthy
