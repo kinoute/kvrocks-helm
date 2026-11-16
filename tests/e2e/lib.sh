@@ -15,6 +15,8 @@ FULLNAME="$RELEASE-kvrocks"
 REPLICAS=3
 HAPROXY_REPLICAS=2
 LOADGEN_IMAGE=kvrocks-e2e-loadgen:dev
+# Part of every key: a run on a kept cluster must not find the keys of an earlier run.
+RUN_ID=$(date +%s)
 
 HEALTHY_TIMEOUT_SECONDS=300
 NEW_MASTER_TIMEOUT_SECONDS=90
@@ -175,7 +177,7 @@ start_load() { # $1: name of the load, also its key prefix
   k delete pod "load-$1" --ignore-not-found >/dev/null
   k run "load-$1" --image="$LOADGEN_IMAGE" --image-pull-policy=Never --restart=Never \
     --labels=app=loadgen --env="KVROCKS_PASSWORD=$(password)" --overrides="$overrides" -- \
-    --host "$FULLNAME" --key-prefix "$1" --settle-seconds "$LOAD_SETTLE_SECONDS" \
+    --host "$FULLNAME" --key-prefix "$1-$RUN_ID" --settle-seconds "$LOAD_SETTLE_SECONDS" \
     --pod-host "$(pod_fqdn 0)" --pod-host "$(pod_fqdn 1)" --pod-host "$(pod_fqdn 2)" >/dev/null
   k wait --for=condition=Ready "pod/load-$1" --timeout=120s >/dev/null
   sleep "$LOAD_WARMUP_SECONDS"
@@ -219,13 +221,13 @@ write_keys() { # $1: prefix, $2: count, $3: ordinal of the pod to run from (defa
     [ "$SECONDS" -lt "$deadline" ] || fail "the write endpoint never took a write"
     sleep 1
   done
-  acked=$(kv_exec "$from" sentinel "seq 1 $2 | sed 's/.*/SET $1:& &/' | redis-cli -h $FULLNAME -p \$KVROCKS_PORT | grep -c '^OK$'")
+  acked=$(kv_exec "$from" sentinel "seq 1 $2 | sed 's/.*/SET $1-$RUN_ID:& &/' | redis-cli -h $FULLNAME -p \$KVROCKS_PORT | grep -c '^OK$'")
   [ "$acked" = "$2" ] || fail "only $acked of the $2 writes of $1 were acknowledged"
 }
 
 # Counts how many of the keys <prefix>:1..<count> a host holds.
 count_keys() { # $1: host, $2: prefix, $3: count
-  kv_exec 0 sentinel "seq 1 $3 | sed 's/.*/EXISTS $2:&/' | redis-cli -h $1 -p \$KVROCKS_PORT | grep -c '^1'"
+  kv_exec 0 sentinel "seq 1 $3 | sed 's/.*/EXISTS $2-$RUN_ID:&/' | redis-cli -h $1 -p \$KVROCKS_PORT | grep -c '^1'"
 }
 
 assert_keys_everywhere() { # $1: scenario, $2: prefix, $3: count
@@ -330,4 +332,31 @@ make_master() { # $1: ordinal
   kv_exec "$1" kvrocks 'kv_cli localhost config set slave-priority 100' >/dev/null
   wait_healthy
   [ "$(current_master)" = "$1" ] || fail "Sentinel did not promote pod $1"
+}
+
+count_failed_hooks() {
+  k get events --field-selector reason=FailedPreStopHook --no-headers 2>/dev/null | wc -l | tr -d ' '
+}
+
+# Cluster DNS, stopped by scaling CoreDNS to zero. Restored by restore_cluster_dns, and by
+# the cleanup of run.sh if a scenario fails halfway.
+COREDNS_REPLICAS=""
+
+stop_cluster_dns() {
+  COREDNS_REPLICAS=$(kubectl -n kube-system get deployment coredns -o jsonpath='{.spec.replicas}')
+  kubectl -n kube-system scale deployment coredns --replicas=0 >/dev/null
+  kubectl -n kube-system wait --for=delete pod -l k8s-app=kube-dns --timeout=60s >/dev/null
+}
+
+restore_cluster_dns() {
+  [ -n "$COREDNS_REPLICAS" ] || return 0
+  kubectl -n kube-system scale deployment coredns --replicas="$COREDNS_REPLICAS" >/dev/null
+  kubectl -n kube-system rollout status deployment coredns --timeout=120s >/dev/null
+  COREDNS_REPLICAS=""
+}
+
+# The Kvrocks image the chart deploys.
+kvrocks_image() {
+  helm template "$RELEASE" "$REPO_ROOT/helm/kvrocks" --values "$E2E_DIR/values.yaml" |
+    awk '$1 == "image:" && $2 ~ /\/apache\/kvrocks:/ { print $2; exit }'
 }

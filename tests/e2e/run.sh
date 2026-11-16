@@ -17,14 +17,17 @@ ALL_SCENARIOS=(
   switchover
   switchover_with_dead_replica
   switchover_with_lagging_replica
+  handover_aborted_on_stop
   plain_sentinel_failover
   rolling_update
+  upgrade_with_new_scripts
   drain
   haproxy_restart
   master_pod_crash
   master_node_failure
   master_partition
   master_isolated_from_peers
+  dns_outage
   replica_volume_loss
   master_volume_loss
   full_outage
@@ -57,6 +60,7 @@ load_images() {
 # Leaves nothing broken behind when a scenario fails halfway.
 cleanup() {
   heal_partition
+  restore_cluster_dns
   if [ -z "${KEEP_CLUSTER:-}" ]; then
     kind delete cluster --name "$CLUSTER_NAME" >/dev/null 2>&1 || true
   fi

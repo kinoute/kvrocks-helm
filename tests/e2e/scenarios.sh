@@ -12,6 +12,7 @@ MAX_PLANNED_WRITE_GAP_SECONDS=${MAX_PLANNED_WRITE_GAP_SECONDS:-10}
 MAX_CRASH_WRITE_GAP_SECONDS=${MAX_CRASH_WRITE_GAP_SECONDS:-40}
 OUTAGE_KEYS=2000
 EMPTY_POD_HEAD_START_SECONDS=40
+DNS_OUTAGE_SECONDS=60
 # An isolated master must stop taking writes within this delay.
 FENCE_DEADLINE_SECONDS=5
 # The writes an isolated master may still acknowledge, in seconds of load: what it takes
@@ -99,6 +100,29 @@ scenario_switchover_with_dead_replica() {
   assert_report switchover_with_dead_replica "$report" "$NO_LOSS" "$MAX_PLANNED_WRITE_GAP_SECONDS"
 }
 
+# The master stops while a replica Sentinel could promote is behind: its preStop handover
+# gives up, and keeps writes paused until the pod is gone. The failover that follows must
+# promote the up-to-date replica and lose nothing.
+scenario_handover_aborted_on_stop() {
+  local master lagging new_master handover_log report
+  master=$(current_master)
+  lagging=$(((master + 1) % REPLICAS))
+  start_load abortedstop
+  cut_replication "$lagging" "$master"
+  sleep "$LOAD_AFTER_FAILURE_SECONDS"
+  k delete pod "$(pod_name "$master")" --wait=false >/dev/null
+  new_master=$(wait_for_new_master "$master")
+  [ "$new_master" != "$lagging" ] ||
+    fail "handover_aborted_on_stop: Sentinel promoted the replica that was behind"
+  heal_partition
+  wait_healthy
+  handover_log=$(kv_exec "$master" kvrocks "cat \$DATA_DIR/handover.log")
+  grep -q 'writes stay paused until this pod stops' <<<"$handover_log" ||
+    fail "handover_aborted_on_stop: the handover did not give up as expected"
+  report=$(finish_load abortedstop)
+  assert_report handover_aborted_on_stop "$report" "$NO_LOSS" "$MAX_CRASH_WRITE_GAP_SECONDS"
+}
+
 # Someone runs a plain SENTINEL FAILOVER instead of the handover script. Sentinel promotes
 # a replica while the old master still accepts writes, so some are lost: that is what the
 # handover script exists to avoid. What the chart still guarantees is that the old master
@@ -131,6 +155,34 @@ scenario_rolling_update() {
     fail "rolling_update: a replica copied the whole database again"
   report=$(finish_load rolling)
   assert_report rolling_update "$report" "$NO_LOSS" "$MAX_PLANNED_WRITE_GAP_SECONDS"
+}
+
+# A helm upgrade that changes the scripts. Their ConfigMap is replaced while the pods of the
+# previous revision still have to run their preStop hook from it.
+scenario_upgrade_with_new_scripts() {
+  local chart failed_hooks_before report
+  chart="$REPO_ROOT/.e2e/chart-upgrade"
+  rm -rf "$chart"
+  cp -R "$REPO_ROOT/helm/kvrocks" "$chart"
+  printf '# upgrade %s\n' "$RUN_ID" >>"$chart/files/scripts/common.sh"
+  failed_hooks_before=$(count_failed_hooks)
+  start_load upgrade
+  helm upgrade "$RELEASE" "$chart" --namespace "$NAMESPACE" --values "$E2E_DIR/values.yaml" >/dev/null
+  k rollout status "statefulset/$FULLNAME" --timeout=600s >/dev/null ||
+    fail "upgrade_with_new_scripts: the rollout did not finish"
+  wait_healthy
+  [ "$(count_failed_hooks)" = "$failed_hooks_before" ] ||
+    fail "upgrade_with_new_scripts: a preStop handover failed"
+  [ "$(count_full_syncs)" = "0" ] ||
+    fail "upgrade_with_new_scripts: a replica copied the whole database again"
+  report=$(finish_load upgrade)
+  assert_report upgrade_with_new_scripts "$report" "$NO_LOSS" "$MAX_PLANNED_WRITE_GAP_SECONDS"
+
+  # Back to the chart itself for the scenarios that follow.
+  helm upgrade "$RELEASE" "$REPO_ROOT/helm/kvrocks" --namespace "$NAMESPACE" \
+    --values "$E2E_DIR/values.yaml" >/dev/null
+  k rollout status "statefulset/$FULLNAME" --timeout=600s >/dev/null
+  wait_healthy
 }
 
 # The node of the master is drained: the pod is evicted and hands over on its way out.
@@ -224,6 +276,24 @@ scenario_master_isolated_from_peers() {
   report=$(finish_load isolated)
   assert_report master_isolated_from_peers "$report" \
     "$(writes_in_seconds "$report" "$MAX_FENCE_SECONDS")" "$MAX_CRASH_WRITE_GAP_SECONDS"
+}
+
+# Cluster DNS stops answering for a minute. Nothing else is wrong, so nothing may change:
+# same master, no write paused, nothing lost.
+scenario_dns_outage() {
+  local master since report
+  master=$(current_master)
+  since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  start_load dnsoutage
+  stop_cluster_dns
+  sleep "$DNS_OUTAGE_SECONDS"
+  restore_cluster_dns
+  wait_healthy
+  [ "$(current_master)" = "$master" ] || fail "dns_outage: the master changed"
+  ! k logs "$(pod_name "$master")" -c fence --since-time="$since" | grep -q 'writes paused' ||
+    fail "dns_outage: the fencing paused a healthy master"
+  report=$(finish_load dnsoutage)
+  assert_report dns_outage "$report" "$NO_LOSS" "$MAX_PLANNED_WRITE_GAP_SECONDS"
 }
 
 # A replica loses its disk: it must come back empty and copy everything again.
@@ -359,6 +429,65 @@ scenario_network_policy() {
   helm upgrade "$RELEASE" "$REPO_ROOT/helm/kvrocks" --namespace "$NAMESPACE" \
     --values "$E2E_DIR/values.yaml" >/dev/null
   wait_healthy
+}
+
+# The migration path from a standalone Kvrocks: its data sits on the volume that pod 0 of a
+# new release claims, and the replicas copy it from there.
+scenario_install_from_existing_data() {
+  local ns=kv-seed seed_release=seed seed_fullname=seed-kvrocks ordinal found
+  kubectl create namespace "$ns" >/dev/null
+  kubectl -n "$ns" apply -f - >/dev/null <<EOF
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: data-$seed_fullname-0
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: standalone
+spec:
+  securityContext:
+    runAsUser: 999
+    fsGroup: 999
+  containers:
+    - name: kvrocks
+      image: $(kvrocks_image)
+      command: ["sh", "-c", "printf 'bind 0.0.0.0\\nport 6379\\ndir /var/lib/kvrocks\\n' >/tmp/kvrocks.conf && exec kvrocks -c /tmp/kvrocks.conf"]
+      volumeMounts:
+        - name: data
+          mountPath: /var/lib/kvrocks
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: data-$seed_fullname-0
+EOF
+  kubectl -n "$ns" wait --for=condition=Ready pod/standalone --timeout=180s >/dev/null ||
+    fail "install_from_existing_data: the standalone Kvrocks did not start"
+  kubectl -n "$ns" exec standalone -- sh -c \
+    "seq 1 $OUTAGE_KEYS | sed 's/.*/SET seed-$RUN_ID:& &/' | MALLOC_CONF= redis-cli >/dev/null"
+  kubectl -n "$ns" delete pod standalone --wait=true >/dev/null
+
+  helm install "$seed_release" "$REPO_ROOT/helm/kvrocks" --namespace "$ns" \
+    --values "$E2E_DIR/values.yaml" --set haproxy.replicaCount=1 >/dev/null
+  kubectl -n "$ns" rollout status "statefulset/$seed_fullname" --timeout=600s >/dev/null ||
+    fail "install_from_existing_data: the pods did not become ready"
+  for ordinal in $(ordinals); do
+    found=$(kubectl -n "$ns" exec "$seed_fullname-$ordinal" -c kvrocks -- sh -c \
+      ". /scripts/common.sh; seq 1 $OUTAGE_KEYS | sed 's/.*/EXISTS seed-$RUN_ID:&/' | redis-cli -p 6379 | grep -c '^1'")
+    [ "$found" = "$OUTAGE_KEYS" ] ||
+      fail "install_from_existing_data: pod $ordinal holds $found of the $OUTAGE_KEYS keys"
+  done
+  [ "$(kubectl -n "$ns" exec "$seed_fullname-0" -c kvrocks -- sh -c '. /scripts/common.sh; kv_role localhost')" = "master" ] ||
+    fail "install_from_existing_data: pod 0, which holds the data, should be the master"
+  printf '    install_from_existing_data: all %s keys are on every pod, pod 0 is master\n' "$OUTAGE_KEYS"
+  helm uninstall "$seed_release" --namespace "$ns" >/dev/null
+  kubectl delete namespace "$ns" --wait=false >/dev/null
 }
 
 # The single-instance mode: no Sentinel, no HAProxy, data survives a restart of the pod.
