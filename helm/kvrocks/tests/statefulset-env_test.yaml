@@ -1,0 +1,404 @@
+suite: StatefulSet - topology and password environment
+templates:
+  - statefulset.yaml
+  # Not asserted on: the StatefulSet includes both to compute its checksum annotations,
+  # and helm-unittest only renders the templates listed here.
+  - configmap.yaml
+  - scripts-configmap.yaml
+release:
+  name: db
+  namespace: data
+set:
+  auth.password: test-password
+tests:
+  # --- Topology the scripts rely on ---
+
+  - it: tells the scripts they run in replication mode by default
+    template: statefulset.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].env
+          content:
+            name: KVROCKS_ARCHITECTURE
+            value: replication
+
+  - it: tells the scripts they run in standalone mode
+    template: statefulset.yaml
+    set:
+      architecture: standalone
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].env
+          content:
+            name: KVROCKS_ARCHITECTURE
+            value: standalone
+
+  - it: builds KVROCKS_PEERS_DOMAIN from the headless Service, the namespace and the cluster domain
+    template: statefulset.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].env
+          content:
+            name: KVROCKS_PEERS_DOMAIN
+            value: db-kvrocks-headless.data.svc.cluster.local
+
+  - it: follows the release namespace in KVROCKS_PEERS_DOMAIN
+    template: statefulset.yaml
+    release:
+      name: db
+      namespace: storage
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].env
+          content:
+            name: KVROCKS_PEERS_DOMAIN
+            value: db-kvrocks-headless.storage.svc.cluster.local
+
+  - it: follows clusterDomain in KVROCKS_PEERS_DOMAIN
+    template: statefulset.yaml
+    set:
+      clusterDomain: k8s.example.com
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].env
+          content:
+            name: KVROCKS_PEERS_DOMAIN
+            value: db-kvrocks-headless.data.svc.k8s.example.com
+
+  - it: names the StatefulSet so the scripts can build pod names
+    template: statefulset.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].env
+          content:
+            name: KVROCKS_STATEFULSET
+            value: db-kvrocks
+
+  - it: sets KVROCKS_REPLICAS to replicaCount
+    template: statefulset.yaml
+    set:
+      replicaCount: 5
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].env
+          content:
+            name: KVROCKS_REPLICAS
+            value: "5"
+
+  - it: sets KVROCKS_REPLICAS to 1 in standalone mode
+    template: statefulset.yaml
+    set:
+      architecture: standalone
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].env
+          content:
+            name: KVROCKS_REPLICAS
+            value: "1"
+
+  - it: gives sentinel the same topology as kvrocks
+    template: statefulset.yaml
+    set:
+      replicaCount: 5
+    asserts:
+      - contains:
+          path: spec.template.spec.initContainers[?(@.name == "sentinel")].env
+          content:
+            name: KVROCKS_ARCHITECTURE
+            value: replication
+      - contains:
+          path: spec.template.spec.initContainers[?(@.name == "sentinel")].env
+          content:
+            name: KVROCKS_STATEFULSET
+            value: db-kvrocks
+      - contains:
+          path: spec.template.spec.initContainers[?(@.name == "sentinel")].env
+          content:
+            name: KVROCKS_PEERS_DOMAIN
+            value: db-kvrocks-headless.data.svc.cluster.local
+      - contains:
+          path: spec.template.spec.initContainers[?(@.name == "sentinel")].env
+          content:
+            name: KVROCKS_REPLICAS
+            value: "5"
+
+  - it: passes the ports and the Sentinel master name to the scripts
+    template: statefulset.yaml
+    set:
+      port: 6380
+      sentinel.port: 26380
+      sentinel.masterName: mymaster
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].env
+          content:
+            name: KVROCKS_PORT
+            value: "6380"
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].env
+          content:
+            name: SENTINEL_PORT
+            value: "26380"
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].env
+          content:
+            name: SENTINEL_MASTER_NAME
+            value: mymaster
+
+  # --- Sentinel ---
+
+  - it: defaults SENTINEL_QUORUM to 2 for 3 pods
+    template: statefulset.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.initContainers[?(@.name == "sentinel")].env
+          content:
+            name: SENTINEL_QUORUM
+            value: "2"
+
+  - it: defaults SENTINEL_QUORUM to 3 for 5 pods
+    template: statefulset.yaml
+    set:
+      replicaCount: 5
+    asserts:
+      - contains:
+          path: spec.template.spec.initContainers[?(@.name == "sentinel")].env
+          content:
+            name: SENTINEL_QUORUM
+            value: "3"
+
+  - it: defaults SENTINEL_QUORUM to a strict majority for an even number of pods
+    template: statefulset.yaml
+    set:
+      replicaCount: 4
+    asserts:
+      - contains:
+          path: spec.template.spec.initContainers[?(@.name == "sentinel")].env
+          content:
+            name: SENTINEL_QUORUM
+            value: "3"
+
+  - it: uses sentinel.quorum when it is set
+    template: statefulset.yaml
+    set:
+      replicaCount: 5
+      sentinel.quorum: 4
+    asserts:
+      - contains:
+          path: spec.template.spec.initContainers[?(@.name == "sentinel")].env
+          content:
+            name: SENTINEL_QUORUM
+            value: "4"
+
+  - it: passes the failover timings to sentinel
+    template: statefulset.yaml
+    set:
+      sentinel.downAfterMilliseconds: 15000
+      sentinel.failoverTimeoutMilliseconds: 90000
+      sentinel.parallelSyncs: 2
+    asserts:
+      - contains:
+          path: spec.template.spec.initContainers[?(@.name == "sentinel")].env
+          content:
+            name: SENTINEL_DOWN_AFTER_MS
+            value: "15000"
+      - contains:
+          path: spec.template.spec.initContainers[?(@.name == "sentinel")].env
+          content:
+            name: SENTINEL_FAILOVER_TIMEOUT_MS
+            value: "90000"
+      - contains:
+          path: spec.template.spec.initContainers[?(@.name == "sentinel")].env
+          content:
+            name: SENTINEL_PARALLEL_SYNCS
+            value: "2"
+
+  - it: passes the switchover pause and the Sentinel failover timeout to kvrocks
+    template: statefulset.yaml
+    set:
+      switchover.pauseMilliseconds: 4500
+      sentinel.failoverTimeoutMilliseconds: 90000
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].env
+          content:
+            name: SWITCHOVER_PAUSE_MS
+            value: "4500"
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].env
+          content:
+            name: SENTINEL_FAILOVER_TIMEOUT_MS
+            value: "90000"
+
+  # --- Exporter ---
+
+  - it: points the exporter at the kvrocks of its own pod
+    template: statefulset.yaml
+    set:
+      port: 6380
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "metrics")].env
+          content:
+            name: KVROCKS_ADDR
+            value: redis://localhost:6380
+
+  # --- Password ---
+
+  - it: reads KVROCKS_PASSWORD from the Secret of the chart in every container
+    template: statefulset.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].env
+          content:
+            name: KVROCKS_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: db-kvrocks
+                key: password
+      - contains:
+          path: spec.template.spec.initContainers[?(@.name == "sentinel")].env
+          content:
+            name: KVROCKS_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: db-kvrocks
+                key: password
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "metrics")].env
+          content:
+            name: KVROCKS_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: db-kvrocks
+                key: password
+
+  - it: reads KVROCKS_PASSWORD from auth.existingSecret
+    template: statefulset.yaml
+    set:
+      auth.password: ""
+      auth.existingSecret: my-credentials
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].env
+          content:
+            name: KVROCKS_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: my-credentials
+                key: password
+      - contains:
+          path: spec.template.spec.initContainers[?(@.name == "sentinel")].env
+          content:
+            name: KVROCKS_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: my-credentials
+                key: password
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "metrics")].env
+          content:
+            name: KVROCKS_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: my-credentials
+                key: password
+
+  - it: reads KVROCKS_PASSWORD from the key auth.secretKey
+    template: statefulset.yaml
+    set:
+      auth.secretKey: kvrocks-password
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].env
+          content:
+            name: KVROCKS_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: db-kvrocks
+                key: kvrocks-password
+      - contains:
+          path: spec.template.spec.initContainers[?(@.name == "sentinel")].env
+          content:
+            name: KVROCKS_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: db-kvrocks
+                key: kvrocks-password
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "metrics")].env
+          content:
+            name: KVROCKS_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: db-kvrocks
+                key: kvrocks-password
+
+  - it: sets no KVROCKS_PASSWORD when auth is disabled
+    template: statefulset.yaml
+    set:
+      auth.enabled: false
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].env
+          content:
+            name: KVROCKS_PASSWORD
+          any: true
+      - notContains:
+          path: spec.template.spec.initContainers[?(@.name == "sentinel")].env
+          content:
+            name: KVROCKS_PASSWORD
+          any: true
+      - notContains:
+          path: spec.template.spec.containers[?(@.name == "metrics")].env
+          content:
+            name: KVROCKS_PASSWORD
+          any: true
+
+  - it: never passes the password on a command line
+    template: statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].command
+          value: ["/scripts/kvrocks-start.sh"]
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].args
+      - equal:
+          path: spec.template.spec.initContainers[?(@.name == "sentinel")].command
+          value: ["/scripts/sentinel-start.sh"]
+      - notExists:
+          path: spec.template.spec.initContainers[?(@.name == "sentinel")].args
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "metrics")].command
+      - notExists:
+          path: spec.template.spec.containers[?(@.name == "metrics")].args
+
+  - it: never writes the password as a literal environment value
+    template: statefulset.yaml
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].env
+          content:
+            value: test-password
+          any: true
+      - notContains:
+          path: spec.template.spec.initContainers[?(@.name == "sentinel")].env
+          content:
+            value: test-password
+          any: true
+      - notContains:
+          path: spec.template.spec.containers[?(@.name == "metrics")].env
+          content:
+            value: test-password
+          any: true
+
+  - it: passes a large Sentinel timeout in full, not in scientific notation
+    template: statefulset.yaml
+    values:
+      - values/large-numbers.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.initContainers[?(@.name == "sentinel")].env
+          content:
+            name: SENTINEL_FAILOVER_TIMEOUT_MS
+            value: "1200000"

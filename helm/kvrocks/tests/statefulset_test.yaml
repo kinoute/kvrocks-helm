@@ -1,0 +1,512 @@
+suite: StatefulSet - pod layout
+templates:
+  - statefulset.yaml
+  # Not asserted on: the StatefulSet includes both to compute its checksum annotations,
+  # and helm-unittest only renders the templates listed here.
+  - configmap.yaml
+  - scripts-configmap.yaml
+release:
+  name: db
+  namespace: data
+set:
+  auth.password: test-password
+tests:
+  # --- Pod count and rollout ---
+
+  - it: runs 3 pods by default
+    template: statefulset.yaml
+    asserts:
+      - isKind:
+          of: StatefulSet
+      - equal:
+          path: spec.replicas
+          value: 3
+
+  - it: runs replicaCount pods in replication mode
+    template: statefulset.yaml
+    set:
+      replicaCount: 5
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 5
+
+  - it: runs a single pod in standalone mode, whatever replicaCount says
+    template: statefulset.yaml
+    set:
+      architecture: standalone
+      replicaCount: 5
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 1
+
+  - it: starts every pod in parallel
+    template: statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.podManagementPolicy
+          value: Parallel
+
+  - it: gets its pod DNS names from the headless Service
+    template: statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.serviceName
+          value: db-kvrocks-headless
+
+  - it: selects its pods by name, instance and component
+    template: statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.selector.matchLabels
+          value:
+            app.kubernetes.io/name: kvrocks
+            app.kubernetes.io/instance: db
+            app.kubernetes.io/component: kvrocks
+      - isSubset:
+          path: spec.template.metadata.labels
+          content:
+            app.kubernetes.io/name: kvrocks
+            app.kubernetes.io/instance: db
+            app.kubernetes.io/component: kvrocks
+
+  # --- Containers ---
+
+  - it: runs kvrocks and metrics as containers in replication mode
+    template: statefulset.yaml
+    asserts:
+      - lengthEqual:
+          path: spec.template.spec.containers
+          count: 2
+      - equal:
+          path: spec.template.spec.containers[0].name
+          value: kvrocks
+      - equal:
+          path: spec.template.spec.containers[1].name
+          value: metrics
+
+  - it: runs sentinel then the fence as sidecars, so they outlive the kvrocks preStop hook
+    template: statefulset.yaml
+    asserts:
+      - lengthEqual:
+          path: spec.template.spec.initContainers
+          count: 2
+      - equal:
+          path: spec.template.spec.initContainers[0].name
+          value: sentinel
+      - equal:
+          path: spec.template.spec.initContainers[0].restartPolicy
+          value: Always
+      - equal:
+          path: spec.template.spec.initContainers[1].name
+          value: fence
+      - equal:
+          path: spec.template.spec.initContainers[1].restartPolicy
+          value: Always
+
+  - it: gives the fence the topology and the Sentinel majority
+    template: statefulset.yaml
+    set:
+      replicaCount: 5
+      sentinel.quorum: 2
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[?(@.name == "fence")].command
+          value: ["/scripts/kvrocks-fence.sh"]
+      - contains:
+          path: spec.template.spec.initContainers[?(@.name == "fence")].env
+          content:
+            name: SENTINEL_MAJORITY
+            value: "3"
+      - contains:
+          path: spec.template.spec.initContainers[?(@.name == "fence")].env
+          content:
+            name: KVROCKS_REPLICAS
+            value: "5"
+
+  - it: runs no fence when fencing is disabled
+    template: statefulset.yaml
+    set:
+      fencing.enabled: false
+    asserts:
+      - lengthEqual:
+          path: spec.template.spec.initContainers
+          count: 1
+      - equal:
+          path: spec.template.spec.initContainers[0].name
+          value: sentinel
+
+  - it: runs no sidecar in standalone mode
+    template: statefulset.yaml
+    set:
+      architecture: standalone
+    asserts:
+      - notExists:
+          path: spec.template.spec.initContainers
+
+  - it: runs no sentinel container in standalone mode
+    template: statefulset.yaml
+    set:
+      architecture: standalone
+    asserts:
+      - lengthEqual:
+          path: spec.template.spec.containers
+          count: 2
+      - equal:
+          path: spec.template.spec.containers[0].name
+          value: kvrocks
+      - equal:
+          path: spec.template.spec.containers[1].name
+          value: metrics
+
+  - it: runs no metrics container when metrics are disabled
+    template: statefulset.yaml
+    set:
+      metrics.enabled: false
+    asserts:
+      - lengthEqual:
+          path: spec.template.spec.containers
+          count: 1
+      - equal:
+          path: spec.template.spec.containers[0].name
+          value: kvrocks
+
+  - it: runs only kvrocks in standalone mode without metrics
+    template: statefulset.yaml
+    set:
+      architecture: standalone
+      metrics.enabled: false
+    asserts:
+      - lengthEqual:
+          path: spec.template.spec.containers
+          count: 1
+      - equal:
+          path: spec.template.spec.containers[0].name
+          value: kvrocks
+
+  # --- Images ---
+
+  - it: defaults the kvrocks image tag to the chart appVersion
+    template: statefulset.yaml
+    chart:
+      appVersion: 9.9.9
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].image
+          value: docker.io/apache/kvrocks:9.9.9
+
+  - it: uses image.tag when it is set
+    template: statefulset.yaml
+    set:
+      image.tag: 2.16.0
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].image
+          value: docker.io/apache/kvrocks:2.16.0
+
+  - it: pins the image by digest, which takes precedence over the tag
+    template: statefulset.yaml
+    set:
+      image.tag: 2.16.0
+      image.digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].image
+          value: docker.io/apache/kvrocks@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+
+  - it: replaces the registry of every image with global.imageRegistry
+    template: statefulset.yaml
+    set:
+      global.imageRegistry: registry.example.com
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].image
+          pattern: '^registry\.example\.com/apache/kvrocks:'
+      - matchRegex:
+          path: spec.template.spec.initContainers[?(@.name == "sentinel")].image
+          pattern: '^registry\.example\.com/valkey/valkey:'
+      - matchRegex:
+          path: spec.template.spec.containers[?(@.name == "metrics")].image
+          pattern: '^registry\.example\.com/kvrocks/kvrocks-exporter:'
+
+  # --- Scripts: entrypoints, probes and preStop hooks ---
+
+  - it: starts kvrocks and sentinel through their start scripts
+    template: statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].command
+          value: ["/scripts/kvrocks-start.sh"]
+      - equal:
+          path: spec.template.spec.initContainers[?(@.name == "sentinel")].command
+          value: ["/scripts/sentinel-start.sh"]
+
+  - it: probes kvrocks with the probe script, one mode per probe
+    template: statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].startupProbe.exec.command
+          value: ["/scripts/kvrocks-probe.sh", "startup"]
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].livenessProbe.exec.command
+          value: ["/scripts/kvrocks-probe.sh", "liveness"]
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].readinessProbe.exec.command
+          value: ["/scripts/kvrocks-probe.sh", "readiness"]
+
+  - it: gives kvrocks 20 minutes to open its database before the startup probe fails
+    template: statefulset.yaml
+    asserts:
+      - isSubset:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].startupProbe
+          content:
+            periodSeconds: 5
+            failureThreshold: 240
+
+  - it: applies probe timings from values next to the script command
+    template: statefulset.yaml
+    set:
+      readinessProbe:
+        periodSeconds: 7
+        timeoutSeconds: 3
+        failureThreshold: 9
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].readinessProbe
+          value:
+            exec:
+              command: ["/scripts/kvrocks-probe.sh", "readiness"]
+            periodSeconds: 7
+            timeoutSeconds: 3
+            failureThreshold: 9
+
+  - it: runs the kvrocks preStop script before a pod stops
+    template: statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].lifecycle.preStop.exec.command
+          value: ["/scripts/kvrocks-prestop.sh"]
+
+  - it: probes sentinel with the sentinel probe script
+    template: statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[?(@.name == "sentinel")].livenessProbe.exec.command
+          value: ["/scripts/sentinel-probe.sh"]
+      - equal:
+          path: spec.template.spec.initContainers[?(@.name == "sentinel")].readinessProbe.exec.command
+          value: ["/scripts/sentinel-probe.sh"]
+
+  - it: needs no preStop hook on sentinel, which Kubernetes stops after kvrocks
+    template: statefulset.yaml
+    asserts:
+      - notExists:
+          path: spec.template.spec.initContainers[?(@.name == "sentinel")].lifecycle
+
+  - it: mounts the scripts ConfigMap as executable files under /scripts
+    template: statefulset.yaml
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.volumes[?(@.name == "scripts")].configMap.name
+          pattern: ^db-kvrocks-scripts-[0-9a-f]{7}$
+      - equal:
+          path: spec.template.spec.volumes[?(@.name == "scripts")].configMap.defaultMode
+          # 0555 in the template; YAML reads the octal as 365.
+          value: 365
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].volumeMounts
+          content:
+            name: scripts
+            mountPath: /scripts
+            readOnly: true
+      - contains:
+          path: spec.template.spec.initContainers[?(@.name == "sentinel")].volumeMounts
+          content:
+            name: scripts
+            mountPath: /scripts
+            readOnly: true
+
+  - it: mounts kvrocks.conf from the chart ConfigMap
+    template: statefulset.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: config
+            configMap:
+              name: db-kvrocks
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].volumeMounts
+          content:
+            name: config
+            mountPath: /etc/kvrocks
+            readOnly: true
+
+  # --- Rollout on config change ---
+
+  - it: annotates the pods with a checksum of kvrocks.conf
+    template: statefulset.yaml
+    asserts:
+      - matchRegex:
+          path: spec.template.metadata.annotations["checksum/config"]
+          pattern: ^[0-9a-f]{64}$
+
+  # --- Security ---
+
+  - it: shares the process namespace in replication mode
+    template: statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.shareProcessNamespace
+          value: true
+
+  - it: does not share the process namespace in standalone mode
+    template: statefulset.yaml
+    set:
+      architecture: standalone
+    asserts:
+      - notExists:
+          path: spec.template.spec.shareProcessNamespace
+
+  - it: runs the pod as a non-root user with the default seccomp profile
+    template: statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext
+          value:
+            runAsNonRoot: true
+            runAsUser: 999
+            runAsGroup: 999
+            fsGroup: 999
+            fsGroupChangePolicy: OnRootMismatch
+            seccompProfile:
+              type: RuntimeDefault
+
+  - it: applies podSecurityContext from values to the pod
+    template: statefulset.yaml
+    set:
+      podSecurityContext:
+        runAsUser: 1001
+    asserts:
+      - isSubset:
+          path: spec.template.spec.securityContext
+          content:
+            runAsUser: 1001
+
+  - it: drops all capabilities and locks the root filesystem in every container
+    template: statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].securityContext
+          value:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+      - equal:
+          path: spec.template.spec.initContainers[?(@.name == "sentinel")].securityContext
+          value:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+      - equal:
+          path: spec.template.spec.containers[?(@.name == "metrics")].securityContext
+          value:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+
+  - it: gives the containers a writable /tmp despite the read-only root filesystem
+    template: statefulset.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: tmp
+            emptyDir: {}
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].volumeMounts
+          content:
+            name: tmp
+            mountPath: /tmp
+      - contains:
+          path: spec.template.spec.initContainers[?(@.name == "sentinel")].volumeMounts
+          content:
+            name: tmp
+            mountPath: /tmp
+
+  - it: does not mount the service account token
+    template: statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: false
+
+  - it: runs as the ServiceAccount of the chart
+    template: statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.serviceAccountName
+          value: db-kvrocks
+
+  - it: runs as the default ServiceAccount when the chart creates none
+    template: statefulset.yaml
+    set:
+      serviceAccount.create: false
+    asserts:
+      - equal:
+          path: spec.template.spec.serviceAccountName
+          value: default
+
+  - it: runs as serviceAccount.name when the chart creates none
+    template: statefulset.yaml
+    set:
+      serviceAccount.create: false
+      serviceAccount.name: existing-account
+    asserts:
+      - equal:
+          path: spec.template.spec.serviceAccountName
+          value: existing-account
+
+  # --- Affinity ---
+
+  - it: prefers one kvrocks pod per node by default
+    template: statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.affinity
+          value:
+            podAntiAffinity:
+              preferredDuringSchedulingIgnoredDuringExecution:
+                - weight: 100
+                  podAffinityTerm:
+                    topologyKey: kubernetes.io/hostname
+                    labelSelector:
+                      matchLabels:
+                        app.kubernetes.io/name: kvrocks
+                        app.kubernetes.io/instance: db
+                        app.kubernetes.io/component: kvrocks
+
+  - it: replaces the default anti-affinity with affinity
+    template: statefulset.yaml
+    set:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: example.com/database
+                    operator: Exists
+    asserts:
+      - equal:
+          path: spec.template.spec.affinity
+          value:
+            nodeAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                nodeSelectorTerms:
+                  - matchExpressions:
+                      - key: example.com/database
+                        operator: Exists

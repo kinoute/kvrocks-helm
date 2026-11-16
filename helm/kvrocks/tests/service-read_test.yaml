@@ -1,0 +1,65 @@
+suite: Service - read endpoint
+templates:
+  - service-read.yaml
+release:
+  name: db
+  namespace: data
+set:
+  auth.password: test-password
+tests:
+  - it: spreads reads over every kvrocks pod in replication mode
+    asserts:
+      - isKind:
+          of: Service
+      - equal:
+          path: metadata.name
+          value: db-kvrocks-read
+      - equal:
+          path: spec.selector
+          value:
+            app.kubernetes.io/name: kvrocks
+            app.kubernetes.io/instance: db
+            app.kubernetes.io/component: kvrocks
+
+  - it: is absent in standalone mode
+    set:
+      architecture: standalone
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: is absent when readService is disabled
+    set:
+      readService.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: exposes readService.port and forwards it to the port named kvrocks
+    set:
+      readService.port: 6380
+    asserts:
+      - equal:
+          path: spec.ports
+          value:
+            - name: kvrocks
+              port: 6380
+              targetPort: kvrocks
+
+  - it: uses the type set in readService.type
+    set:
+      readService.type: NodePort
+    asserts:
+      - equal:
+          path: spec.type
+          value: NodePort
+
+  - it: carries readService.annotations
+    set:
+      readService.annotations:
+        example.com/owner: data-team
+    asserts:
+      - equal:
+          path: metadata.annotations
+          value:
+            example.com/owner: data-team

@@ -1,0 +1,96 @@
+suite: Service - write endpoint
+templates:
+  - service.yaml
+release:
+  name: db
+  namespace: data
+set:
+  auth.password: test-password
+tests:
+  - it: routes writes to HAProxy in replication mode
+    asserts:
+      - isKind:
+          of: Service
+      - equal:
+          path: spec.selector
+          value:
+            app.kubernetes.io/name: kvrocks
+            app.kubernetes.io/instance: db
+            app.kubernetes.io/component: haproxy
+
+  - it: routes writes to the single Kvrocks pod in standalone mode
+    set:
+      architecture: standalone
+    asserts:
+      - isKind:
+          of: Service
+      - equal:
+          path: spec.selector
+          value:
+            app.kubernetes.io/name: kvrocks
+            app.kubernetes.io/instance: db
+            app.kubernetes.io/component: kvrocks
+
+  - it: is absent in replication mode without HAProxy, where clients ask Sentinel
+    set:
+      haproxy.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: stays in standalone mode when HAProxy is disabled
+    set:
+      architecture: standalone
+      haproxy.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 1
+
+  - it: takes the full name of the release
+    asserts:
+      - equal:
+          path: metadata.name
+          value: db-kvrocks
+
+  - it: takes exactly the name set in fullnameOverride
+    set:
+      fullnameOverride: cache
+    asserts:
+      - equal:
+          path: metadata.name
+          value: cache
+
+  - it: exposes service.port and forwards it to the port named kvrocks
+    set:
+      service.port: 6380
+    asserts:
+      - equal:
+          path: spec.ports
+          value:
+            - name: kvrocks
+              port: 6380
+              targetPort: kvrocks
+
+  - it: is a ClusterIP Service by default
+    asserts:
+      - equal:
+          path: spec.type
+          value: ClusterIP
+
+  - it: uses the type set in service.type
+    set:
+      service.type: LoadBalancer
+    asserts:
+      - equal:
+          path: spec.type
+          value: LoadBalancer
+
+  - it: carries service.annotations
+    set:
+      service.annotations:
+        example.com/owner: data-team
+    asserts:
+      - equal:
+          path: metadata.annotations
+          value:
+            example.com/owner: data-team

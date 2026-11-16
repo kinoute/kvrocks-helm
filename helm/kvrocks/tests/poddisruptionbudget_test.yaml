@@ -1,0 +1,51 @@
+suite: PodDisruptionBudget - Kvrocks
+templates:
+  - poddisruptionbudget.yaml
+release:
+  name: db
+  namespace: data
+set:
+  auth.password: test-password
+tests:
+  - it: protects the kvrocks pods in replication mode
+    asserts:
+      - isKind:
+          of: PodDisruptionBudget
+      - equal:
+          path: metadata.name
+          value: db-kvrocks
+      - equal:
+          path: spec.selector.matchLabels
+          value:
+            app.kubernetes.io/name: kvrocks
+            app.kubernetes.io/instance: db
+            app.kubernetes.io/component: kvrocks
+
+  - it: lets one kvrocks pod be unavailable by default
+    asserts:
+      - equal:
+          path: spec.maxUnavailable
+          value: 1
+
+  - it: uses podDisruptionBudget.maxUnavailable
+    set:
+      replicaCount: 5
+      podDisruptionBudget.maxUnavailable: 2
+    asserts:
+      - equal:
+          path: spec.maxUnavailable
+          value: 2
+
+  - it: is absent in standalone mode
+    set:
+      architecture: standalone
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: is absent when podDisruptionBudget is disabled
+    set:
+      podDisruptionBudget.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0

@@ -1,0 +1,159 @@
+suite: Helm test pod
+templates:
+  - tests/test-write.yaml
+release:
+  name: db
+  namespace: data
+set:
+  auth.password: test-password
+tests:
+  # --- Hook ---
+
+  - it: runs as a Helm test hook
+    asserts:
+      - isKind:
+          of: Pod
+      - equal:
+          path: metadata.annotations["helm.sh/hook"]
+          value: test
+
+  - it: is deleted before a new run and after a success
+    asserts:
+      - equal:
+          path: metadata.annotations["helm.sh/hook-delete-policy"]
+          value: before-hook-creation,hook-succeeded
+
+  - it: runs once, without restart
+    asserts:
+      - equal:
+          path: spec.restartPolicy
+          value: Never
+
+  # --- Presence ---
+
+  - it: is rendered in standalone mode
+    set:
+      architecture: standalone
+    asserts:
+      - hasDocuments:
+          count: 1
+
+  - it: is absent in replication mode without HAProxy, where there is no write endpoint
+    set:
+      haproxy.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  # --- What it writes to ---
+
+  - it: writes through the write Service
+    asserts:
+      - contains:
+          path: spec.containers[0].env
+          content:
+            name: WRITE_HOST
+            value: db-kvrocks
+      - contains:
+          path: spec.containers[0].env
+          content:
+            name: WRITE_PORT
+            value: "6379"
+
+  - it: follows service.port
+    set:
+      service.port: 6380
+    asserts:
+      - contains:
+          path: spec.containers[0].env
+          content:
+            name: WRITE_PORT
+            value: "6380"
+
+  - it: runs redis-cli from the kvrocks image
+    chart:
+      appVersion: 9.9.9
+    asserts:
+      - equal:
+          path: spec.containers[0].image
+          value: docker.io/apache/kvrocks:9.9.9
+
+  # --- Password ---
+
+  - it: reads KVROCKS_PASSWORD from the Secret of the chart
+    asserts:
+      - contains:
+          path: spec.containers[0].env
+          content:
+            name: KVROCKS_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: db-kvrocks
+                key: password
+
+  - it: reads KVROCKS_PASSWORD from auth.existingSecret and auth.secretKey
+    set:
+      auth.password: ""
+      auth.existingSecret: my-credentials
+      auth.secretKey: kvrocks-password
+    asserts:
+      - contains:
+          path: spec.containers[0].env
+          content:
+            name: KVROCKS_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: my-credentials
+                key: kvrocks-password
+
+  - it: sets no KVROCKS_PASSWORD when auth is disabled
+    set:
+      auth.enabled: false
+    asserts:
+      - notContains:
+          path: spec.containers[0].env
+          content:
+            name: KVROCKS_PASSWORD
+          any: true
+
+  - it: hands the password to redis-cli through the environment, never as an argument
+    asserts:
+      - lengthEqual:
+          path: spec.containers[0].command
+          count: 3
+      - matchRegex:
+          path: spec.containers[0].command[2]
+          pattern: 'export REDISCLI_AUTH="\$\{KVROCKS_PASSWORD:-\}"'
+      - notMatchRegex:
+          path: spec.containers[0].command[2]
+          pattern: test-password
+      - notExists:
+          path: spec.containers[0].args
+
+  # --- Security ---
+
+  - it: runs with the security contexts of the kvrocks pods
+    asserts:
+      - equal:
+          path: spec.securityContext
+          value:
+            runAsNonRoot: true
+            runAsUser: 999
+            runAsGroup: 999
+            fsGroup: 999
+            fsGroupChangePolicy: OnRootMismatch
+            seccompProfile:
+              type: RuntimeDefault
+      - equal:
+          path: spec.containers[0].securityContext
+          value:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+
+  - it: does not mount the service account token
+    asserts:
+      - equal:
+          path: spec.automountServiceAccountToken
+          value: false

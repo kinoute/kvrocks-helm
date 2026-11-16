@@ -1,0 +1,66 @@
+suite: HAProxy - metrics Service
+templates:
+  - haproxy/service-metrics.yaml
+release:
+  name: db
+  namespace: data
+set:
+  auth.password: test-password
+tests:
+  - it: selects the HAProxy pods
+    asserts:
+      - isKind:
+          of: Service
+      - equal:
+          path: metadata.name
+          value: db-kvrocks-haproxy-metrics
+      - equal:
+          path: spec.selector
+          value:
+            app.kubernetes.io/name: kvrocks
+            app.kubernetes.io/instance: db
+            app.kubernetes.io/component: haproxy
+
+  - it: is headless, so that each HAProxy pod is scraped on its own
+    asserts:
+      - equal:
+          path: spec.clusterIP
+          value: None
+
+  - it: exposes the health port of HAProxy under the name metrics
+    asserts:
+      - equal:
+          path: spec.ports
+          value:
+            - name: metrics
+              port: 8888
+              targetPort: http
+
+  - it: follows haproxy.healthPort
+    set:
+      haproxy.healthPort: 9000
+    asserts:
+      - equal:
+          path: spec.ports[0].port
+          value: 9000
+
+  - it: is absent when metrics are disabled
+    set:
+      metrics.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: is absent when HAProxy is disabled
+    set:
+      haproxy.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: is absent in standalone mode
+    set:
+      architecture: standalone
+    asserts:
+      - hasDocuments:
+          count: 0

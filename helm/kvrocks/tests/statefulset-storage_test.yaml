@@ -1,0 +1,88 @@
+suite: StatefulSet - storage
+templates:
+  - statefulset.yaml
+  # Not asserted on: the StatefulSet includes both to compute its checksum annotations,
+  # and helm-unittest only renders the templates listed here.
+  - configmap.yaml
+  - scripts-configmap.yaml
+release:
+  name: db
+  namespace: data
+set:
+  auth.password: test-password
+tests:
+  - it: claims one 10Gi ReadWriteOnce volume per pod by default
+    template: statefulset.yaml
+    asserts:
+      - lengthEqual:
+          path: spec.volumeClaimTemplates
+          count: 1
+      - equal:
+          path: spec.volumeClaimTemplates[0].metadata.name
+          value: data
+      - equal:
+          path: spec.volumeClaimTemplates[0].spec.accessModes
+          value: [ReadWriteOnce]
+      - equal:
+          path: spec.volumeClaimTemplates[0].spec.resources.requests.storage
+          value: 10Gi
+
+  - it: claims the size set in persistence.size
+    template: statefulset.yaml
+    set:
+      persistence.size: 250Gi
+    asserts:
+      - equal:
+          path: spec.volumeClaimTemplates[0].spec.resources.requests.storage
+          value: 250Gi
+
+  - it: leaves the StorageClass to the cluster default when none is set
+    template: statefulset.yaml
+    asserts:
+      - notExists:
+          path: spec.volumeClaimTemplates[0].spec.storageClassName
+
+  - it: uses persistence.storageClass when it is set
+    template: statefulset.yaml
+    set:
+      persistence.storageClass: fast-ssd
+    asserts:
+      - equal:
+          path: spec.volumeClaimTemplates[0].spec.storageClassName
+          value: fast-ssd
+
+  - it: mounts the data volume in kvrocks and sentinel
+    template: statefulset.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].volumeMounts
+          content:
+            name: data
+            mountPath: /var/lib/kvrocks
+      - contains:
+          path: spec.template.spec.initContainers[?(@.name == "sentinel")].volumeMounts
+          content:
+            name: data
+            mountPath: /var/lib/kvrocks
+
+  - it: declares no data volume next to the claim template
+    template: statefulset.yaml
+    asserts:
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: data
+          any: true
+
+  - it: stores data in an emptyDir when persistence is disabled
+    template: statefulset.yaml
+    set:
+      persistence.enabled: false
+    asserts:
+      - notExists:
+          path: spec.volumeClaimTemplates
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: data
+            emptyDir: {}

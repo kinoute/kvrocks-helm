@@ -1,0 +1,416 @@
+suite: HAProxy - haproxy.cfg
+templates:
+  - haproxy/configmap.yaml
+release:
+  name: db
+  namespace: data
+set:
+  auth.password: test-password
+# haproxy.cfg is one string: the assertions are regular expressions. `(?m)` makes ^ and $
+# match line by line. `(  .*\n)*?` skips indented lines, so a match stays inside the
+# section named at its start (sections are separated by an empty line).
+tests:
+  - it: is named after the release, where the Deployment mounts it from
+    asserts:
+      - isKind:
+          of: ConfigMap
+      - equal:
+          path: metadata.name
+          value: db-kvrocks-haproxy
+
+  - it: is absent in standalone mode
+    set:
+      architecture: standalone
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: is absent when HAProxy is disabled
+    set:
+      haproxy.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  # --- One pair of backends per pod ---
+
+  - it: declares one kvrocks backend per pod
+    asserts:
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: (?m)^backend kvrocks_0$
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: (?m)^backend kvrocks_1$
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: (?m)^backend kvrocks_2$
+      - notMatchRegex:
+          path: data["haproxy.cfg"]
+          pattern: (?m)^backend kvrocks_3$
+
+  - it: declares one sentinel_votes backend per pod
+    asserts:
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: (?m)^backend sentinel_votes_0$
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: (?m)^backend sentinel_votes_1$
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: (?m)^backend sentinel_votes_2$
+      - notMatchRegex:
+          path: data["haproxy.cfg"]
+          pattern: (?m)^backend sentinel_votes_3$
+
+  - it: adds backends when replicaCount grows
+    set:
+      replicaCount: 5
+    asserts:
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: (?m)^backend kvrocks_4$
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: (?m)^backend sentinel_votes_4$
+      - notMatchRegex:
+          path: data["haproxy.cfg"]
+          pattern: (?m)^backend kvrocks_5$
+      - notMatchRegex:
+          path: data["haproxy.cfg"]
+          pattern: (?m)^backend sentinel_votes_5$
+
+  # --- Pod addresses ---
+
+  - it: reaches each Kvrocks by the fully qualified name of its pod
+    asserts:
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: 'backend kvrocks_0\n(  .*\n)*?  server kvrocks_0 db-kvrocks-0\.db-kvrocks-headless\.data\.svc\.cluster\.local:6379 '
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: 'backend kvrocks_1\n(  .*\n)*?  server kvrocks_1 db-kvrocks-1\.db-kvrocks-headless\.data\.svc\.cluster\.local:6379 '
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: 'backend kvrocks_2\n(  .*\n)*?  server kvrocks_2 db-kvrocks-2\.db-kvrocks-headless\.data\.svc\.cluster\.local:6379 '
+
+  - it: reaches each Sentinel by the fully qualified name of its pod
+    asserts:
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: '(?m)^  server sentinel_0 db-kvrocks-0\.db-kvrocks-headless\.data\.svc\.cluster\.local:26379 '
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: '(?m)^  server sentinel_1 db-kvrocks-1\.db-kvrocks-headless\.data\.svc\.cluster\.local:26379 '
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: '(?m)^  server sentinel_2 db-kvrocks-2\.db-kvrocks-headless\.data\.svc\.cluster\.local:26379 '
+
+  - it: follows the release namespace in the pod names
+    release:
+      name: db
+      namespace: storage
+    asserts:
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: '(?m)^  server kvrocks_0 db-kvrocks-0\.db-kvrocks-headless\.storage\.svc\.cluster\.local:6379 '
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: '(?m)^  server sentinel_0 db-kvrocks-0\.db-kvrocks-headless\.storage\.svc\.cluster\.local:26379 '
+
+  - it: follows clusterDomain in the pod names
+    set:
+      clusterDomain: k8s.example.com
+    asserts:
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: '(?m)^  server kvrocks_0 db-kvrocks-0\.db-kvrocks-headless\.data\.svc\.k8s\.example\.com:6379 '
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: '(?m)^  server sentinel_0 db-kvrocks-0\.db-kvrocks-headless\.data\.svc\.k8s\.example\.com:26379 '
+
+  - it: follows port and sentinel.port in the server addresses
+    set:
+      port: 6380
+      sentinel.port: 26380
+    asserts:
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: '(?m)^  server kvrocks_0 \S+\.cluster\.local:6380 '
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: '(?m)^  server sentinel_0 \S+\.cluster\.local:26380 '
+
+  # --- Votes: which pod do the Sentinels name as master ---
+
+  - it: counts in each sentinel_votes backend the Sentinels that name its own pod as master
+    asserts:
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: 'backend sentinel_votes_0\n(  .*\n)*?  tcp-check expect min-recv 0 string db-kvrocks-0\.db-kvrocks-headless\.data\.svc\.cluster\.local\n'
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: 'backend sentinel_votes_1\n(  .*\n)*?  tcp-check expect min-recv 0 string db-kvrocks-1\.db-kvrocks-headless\.data\.svc\.cluster\.local\n'
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: 'backend sentinel_votes_2\n(  .*\n)*?  tcp-check expect min-recv 0 string db-kvrocks-2\.db-kvrocks-headless\.data\.svc\.cluster\.local\n'
+
+  - it: asks every Sentinel for its vote in each sentinel_votes backend
+    asserts:
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: 'backend sentinel_votes_2\n(  .*\n)*?  server sentinel_0 .*\n(  .*\n)*?  server sentinel_1 .*\n(  .*\n)*?  server sentinel_2 '
+
+  - it: asks Sentinel for the master by the name set in sentinel.masterName
+    set:
+      sentinel.masterName: mymaster
+    asserts:
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: '(?m)^  tcp-check send "SENTINEL get-master-addr-by-name mymaster\\r\\n"$'
+
+  - it: flips a Sentinel vote on a single answer
+    asserts:
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: '(?m)^  server sentinel_0 \S+ check inter 1s fall 1 rise 1$'
+
+  # --- Routing ---
+
+  - it: routes writes to the pod that a quorum of Sentinels names as master
+    asserts:
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: 'frontend kvrocks_write\n(  .*\n)*?  use_backend kvrocks_0 if \{ nbsrv\(sentinel_votes_0\) ge 2 \}\n'
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: 'frontend kvrocks_write\n(  .*\n)*?  use_backend kvrocks_1 if \{ nbsrv\(sentinel_votes_1\) ge 2 \}\n'
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: 'frontend kvrocks_write\n(  .*\n)*?  use_backend kvrocks_2 if \{ nbsrv\(sentinel_votes_2\) ge 2 \}\n'
+
+  - it: refuses writes when no quorum agrees on a master
+    asserts:
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: 'frontend kvrocks_write\n(  .*\n)*?  default_backend no_master\n'
+      # The backend has no server at all: an empty line follows its name.
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: '(?m)^backend no_master\n\n'
+
+  - it: requires the majority quorum of replicaCount in the routing rules
+    set:
+      replicaCount: 5
+    asserts:
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: '(?m)^  use_backend kvrocks_4 if \{ nbsrv\(sentinel_votes_4\) ge 3 \}$'
+      - notMatchRegex:
+          path: data["haproxy.cfg"]
+          pattern: '(?m)^  use_backend .* ge 2 \}$'
+
+  - it: routes on a majority of Sentinels even when sentinel.quorum is lower
+    set:
+      replicaCount: 5
+      sentinel.quorum: 2
+    asserts:
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: '(?m)^  use_backend kvrocks_0 if \{ nbsrv\(sentinel_votes_0\) ge 3 \}$'
+      - notMatchRegex:
+          path: data["haproxy.cfg"]
+          pattern: '(?m)^  use_backend .* ge 2 \}$'
+
+  - it: routes on a majority of Sentinels even when sentinel.quorum is higher
+    set:
+      sentinel.quorum: 3
+    asserts:
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: '(?m)^  use_backend kvrocks_0 if \{ nbsrv\(sentinel_votes_0\) ge 2 \}$'
+
+  - it: keeps the last known pod addresses through a DNS outage
+    set:
+      haproxy.dnsOutageTolerance: 2h
+    asserts:
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: '(?m)^  hold timeout 2h$'
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: '(?m)^  hold refused 2h$'
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: '(?m)^  hold other 2h$'
+
+  - it: listens for writes on port
+    set:
+      port: 6380
+    asserts:
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: 'frontend kvrocks_write\n  bind :6380\n'
+
+  - it: cuts client connections to a Kvrocks that stops being master
+    asserts:
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: 'backend kvrocks_0\n(  .*\n)*?  tcp-check expect min-recv 0 string role:master\n  server kvrocks_0 \S+ check inter 1s fall 3 rise 1 on-marked-down shutdown-sessions\n'
+
+  # --- Authentication of the health checks ---
+
+  - it: authenticates to Kvrocks and Sentinel with the KVROCKS_PASSWORD environment variable
+    asserts:
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: 'backend kvrocks_0\n  option tcp-check\n  tcp-check connect\n  tcp-check send "AUTH \$\{KVROCKS_PASSWORD\}\\r\\n"\n  tcp-check expect string \+OK\n'
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: 'backend sentinel_votes_0\n  option tcp-check\n  tcp-check connect\n  tcp-check send "AUTH \$\{KVROCKS_PASSWORD\}\\r\\n"\n  tcp-check expect string \+OK\n'
+
+  - it: sends no AUTH when auth is disabled
+    set:
+      auth.enabled: false
+    asserts:
+      - notMatchRegex:
+          path: data["haproxy.cfg"]
+          pattern: AUTH
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: 'backend kvrocks_0\n  option tcp-check\n  tcp-check connect\n  tcp-check send "INFO replication\\r\\n"\n'
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: 'backend sentinel_votes_0\n  option tcp-check\n  tcp-check connect\n  tcp-check send "SENTINEL get-master-addr-by-name kvrocks\\r\\n"\n'
+
+  - it: never contains the password itself
+    asserts:
+      - notMatchRegex:
+          path: data["haproxy.cfg"]
+          pattern: test-password
+
+  # --- Check and timeout settings ---
+
+  - it: checks Kvrocks and Sentinel every haproxy.check.interval
+    set:
+      haproxy.check.interval: 500ms
+    asserts:
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: '(?m)^  server kvrocks_0 \S+ check inter 500ms '
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: '(?m)^  server sentinel_0 \S+ check inter 500ms '
+      - notMatchRegex:
+          path: data["haproxy.cfg"]
+          pattern: check inter 1s
+
+  - it: cuts a Kvrocks after haproxy.check.fall failed role checks
+    set:
+      haproxy.check.fall: 5
+    asserts:
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: '(?m)^  server kvrocks_0 \S+ check inter 1s fall 5 rise 1 '
+      # haproxy.check.fall is about Kvrocks only: a Sentinel vote still flips at once.
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: '(?m)^  server sentinel_0 \S+ check inter 1s fall 1 rise 1$'
+
+  - it: applies the default timeouts
+    asserts:
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: (?m)^  timeout connect 4s$
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: (?m)^  timeout check 2s$
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: (?m)^  timeout client 1d$
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: (?m)^  timeout server 1d$
+
+  - it: applies the timeouts set in haproxy.timeouts
+    set:
+      haproxy.timeouts:
+        connect: 2s
+        check: 1s
+        client: 1h
+        server: 2h
+    asserts:
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: (?m)^  timeout connect 2s$
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: (?m)^  timeout check 1s$
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: (?m)^  timeout client 1h$
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: (?m)^  timeout server 2h$
+
+  - it: limits connections to haproxy.maxConnections
+    set:
+      haproxy.maxConnections: 2000
+    asserts:
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: (?m)^  maxconn 2000$
+
+  # --- Health and metrics endpoints ---
+
+  - it: serves the health endpoints on haproxy.healthPort
+    set:
+      haproxy.healthPort: 9000
+    asserts:
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: 'frontend health\n  mode http\n  bind :9000\n'
+
+  - it: answers /livez as long as HAProxy runs
+    asserts:
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: '(?m)^  http-request return status 200 content-type text/plain string "alive" if \{ path /livez \}$'
+
+  - it: answers /readyz with 200 only while the master a quorum agrees on is reachable
+    asserts:
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: '(?m)^  http-request return status 200 .* if \{ path /readyz \} \{ nbsrv\(sentinel_votes_0\) ge 2 \} \{ nbsrv\(kvrocks_0\) ge 1 \}$'
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: '(?m)^  http-request return status 200 .* if \{ path /readyz \} \{ nbsrv\(sentinel_votes_1\) ge 2 \} \{ nbsrv\(kvrocks_1\) ge 1 \}$'
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: '(?m)^  http-request return status 200 .* if \{ path /readyz \} \{ nbsrv\(sentinel_votes_2\) ge 2 \} \{ nbsrv\(kvrocks_2\) ge 1 \}$'
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: '(?m)^  http-request return status 503 .* if \{ path /readyz \}$'
+
+  - it: serves Prometheus metrics on /metrics when metrics are enabled
+    asserts:
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: '(?m)^  http-request use-service prometheus-exporter if \{ path /metrics \}$'
+
+  - it: serves no metrics when metrics are disabled
+    set:
+      metrics.enabled: false
+    asserts:
+      - notMatchRegex:
+          path: data["haproxy.cfg"]
+          pattern: prometheus-exporter
+
+  - it: writes a large connection limit in full, not in scientific notation
+    values:
+      - values/large-numbers.yaml
+    asserts:
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: (?m)^\s*maxconn 1000000$

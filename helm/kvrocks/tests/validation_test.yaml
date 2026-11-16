@@ -1,0 +1,233 @@
+suite: Render-time validation
+# The checks live in the "kvrocks.validate" helper, which configmap.yaml includes: that
+# template is always rendered, so a refused value fails the whole release.
+templates:
+  - configmap.yaml
+release:
+  name: db
+  namespace: data
+set:
+  auth.password: test-password
+tests:
+  # --- Password ---
+
+  - it: refuses auth without a password or an existing Secret
+    set:
+      auth.password: ""
+    asserts:
+      - failedTemplate:
+          errorMessage: "auth is enabled: set auth.existingSecret or auth.password"
+
+  - it: accepts auth with an existing Secret and no password
+    set:
+      auth.password: ""
+      auth.existingSecret: my-credentials
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: accepts no password at all when auth is disabled
+    set:
+      auth.enabled: false
+      auth.password: ""
+    asserts:
+      - notFailedTemplate: {}
+
+  # --- Pod count ---
+
+  - it: refuses fewer than 3 pods in replication mode
+    set:
+      replicaCount: 2
+    asserts:
+      - failedTemplate:
+          errorMessage: "replication needs replicaCount >= 3: with fewer pods, losing one leaves no Sentinel majority"
+
+  - it: accepts 3 pods in replication mode
+    set:
+      replicaCount: 3
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: accepts a single pod in standalone mode
+    set:
+      architecture: standalone
+      replicaCount: 1
+    asserts:
+      - notFailedTemplate: {}
+
+  # --- Switchover pause ---
+
+  - it: refuses a switchover pause equal to the Sentinel down-after delay
+    set:
+      switchover.pauseMilliseconds: 10000
+      sentinel.downAfterMilliseconds: 10000
+    asserts:
+      - failedTemplate:
+          errorMessage: "switchover.pauseMilliseconds must be lower than sentinel.downAfterMilliseconds, or Sentinel declares the paused master down"
+
+  - it: refuses a switchover pause longer than the Sentinel down-after delay
+    set:
+      switchover.pauseMilliseconds: 15000
+      sentinel.downAfterMilliseconds: 10000
+    asserts:
+      - failedTemplate:
+          errorMessage: "switchover.pauseMilliseconds must be lower than sentinel.downAfterMilliseconds, or Sentinel declares the paused master down"
+
+  - it: accepts a switchover pause just below the Sentinel down-after delay
+    set:
+      switchover.pauseMilliseconds: 9999
+      sentinel.downAfterMilliseconds: 10000
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: does not check the switchover pause in standalone mode
+    set:
+      architecture: standalone
+      switchover.pauseMilliseconds: 15000
+      sentinel.downAfterMilliseconds: 10000
+    asserts:
+      - notFailedTemplate: {}
+
+  # --- Settings the chart owns: one test per reserved key ---
+
+  - it: refuses bind in config
+    set:
+      config:
+        bind: 127.0.0.1
+    asserts:
+      - failedTemplate:
+          errorMessage: config.bind is managed by the chart and cannot be overridden
+
+  - it: refuses port in config
+    set:
+      config:
+        port: 6380
+    asserts:
+      - failedTemplate:
+          errorMessage: config.port is managed by the chart and cannot be overridden
+
+  - it: refuses dir in config
+    set:
+      config:
+        dir: /data
+    asserts:
+      - failedTemplate:
+          errorMessage: config.dir is managed by the chart and cannot be overridden
+
+  - it: refuses pidfile in config
+    set:
+      config:
+        pidfile: /run/kvrocks.pid
+    asserts:
+      - failedTemplate:
+          errorMessage: config.pidfile is managed by the chart and cannot be overridden
+
+  - it: refuses log-dir in config
+    set:
+      config:
+        log-dir: /var/log
+    asserts:
+      - failedTemplate:
+          errorMessage: config.log-dir is managed by the chart and cannot be overridden
+
+  - it: refuses daemonize in config
+    set:
+      config:
+        daemonize: "yes"
+    asserts:
+      - failedTemplate:
+          errorMessage: config.daemonize is managed by the chart and cannot be overridden
+
+  - it: refuses cluster-enabled in config
+    set:
+      config:
+        cluster-enabled: "yes"
+    asserts:
+      - failedTemplate:
+          errorMessage: config.cluster-enabled is managed by the chart and cannot be overridden
+
+  - it: refuses requirepass in config
+    set:
+      config:
+        requirepass: another-password
+    asserts:
+      - failedTemplate:
+          errorMessage: config.requirepass is managed by the chart and cannot be overridden
+
+  - it: refuses masterauth in config
+    set:
+      config:
+        masterauth: another-password
+    asserts:
+      - failedTemplate:
+          errorMessage: config.masterauth is managed by the chart and cannot be overridden
+
+  - it: refuses slaveof in config
+    set:
+      config:
+        slaveof: 10.0.0.1 6379
+    asserts:
+      - failedTemplate:
+          errorMessage: config.slaveof is managed by the chart and cannot be overridden
+
+  - it: refuses replicaof in config
+    set:
+      config:
+        replicaof: 10.0.0.1 6379
+    asserts:
+      - failedTemplate:
+          errorMessage: config.replicaof is managed by the chart and cannot be overridden
+
+  - it: refuses replica-announce-ip in config
+    set:
+      config:
+        replica-announce-ip: 10.0.0.1
+    asserts:
+      - failedTemplate:
+          errorMessage: config.replica-announce-ip is managed by the chart and cannot be overridden
+
+  - it: refuses replica-announce-port in config
+    set:
+      config:
+        replica-announce-port: 6379
+    asserts:
+      - failedTemplate:
+          errorMessage: config.replica-announce-port is managed by the chart and cannot be overridden
+
+  - it: refuses a quorum that more Sentinels than pods would have to reach
+    set:
+      sentinel.quorum: 4
+    asserts:
+      - failedTemplate:
+          errorMessage: "sentinel.quorum must be between 1 and replicaCount: no more Sentinels than pods can agree"
+
+  - it: accepts a quorum equal to the number of pods
+    set:
+      sentinel.quorum: 3
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: refuses a Kvrocks older than 2.16.0, which cannot pause writes for a handover
+    set:
+      image.tag: 2.15.0
+    asserts:
+      - failedTemplate:
+          errorMessage: "image.tag 2.15.0: replication needs Kvrocks 2.16.0 or later, the first with CLIENT PAUSE WRITE"
+
+  - it: accepts a release candidate of a later version
+    set:
+      image.tag: v2.18.0-rc1
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: accepts an old Kvrocks in standalone mode, which never hands over
+    set:
+      architecture: standalone
+      image.tag: 2.15.0
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: does not guess the version of a tag that is not one
+    set:
+      image.tag: nightly
+    asserts:
+      - notFailedTemplate: {}

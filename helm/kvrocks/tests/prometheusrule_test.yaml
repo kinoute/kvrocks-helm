@@ -1,0 +1,214 @@
+suite: PrometheusRule
+templates:
+  - prometheusrule.yaml
+release:
+  name: db
+  namespace: data
+set:
+  auth.password: test-password
+tests:
+  # --- Presence ---
+
+  - it: is absent by default
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: is created when metrics.prometheusRule is enabled
+    set:
+      metrics.prometheusRule.enabled: true
+    asserts:
+      - isKind:
+          of: PrometheusRule
+      - isAPIVersion:
+          of: monitoring.coreos.com/v1
+      - equal:
+          path: metadata.name
+          value: db-kvrocks
+      - lengthEqual:
+          path: spec.groups
+          count: 1
+
+  - it: is absent when metrics are disabled, even if it is enabled itself
+    set:
+      metrics.enabled: false
+      metrics.prometheusRule.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: carries the labels Prometheus selects PrometheusRules by
+    set:
+      metrics.prometheusRule.enabled: true
+      metrics.prometheusRule.labels:
+        release: prometheus
+    asserts:
+      - isSubset:
+          path: metadata.labels
+          content:
+            release: prometheus
+            app.kubernetes.io/name: kvrocks
+            app.kubernetes.io/instance: db
+
+  # --- Which alerts exist ---
+
+  - it: defines every alert in replication mode with HAProxy
+    set:
+      metrics.prometheusRule.enabled: true
+    asserts:
+      - lengthEqual:
+          path: spec.groups[0].rules
+          count: 7
+      - equal:
+          path: spec.groups[0].rules[0].alert
+          value: KvrocksInstanceDown
+      - equal:
+          path: spec.groups[0].rules[1].alert
+          value: KvrocksMasterCountWrong
+      - equal:
+          path: spec.groups[0].rules[2].alert
+          value: KvrocksReplicationBroken
+      - equal:
+          path: spec.groups[0].rules[3].alert
+          value: KvrocksReplicasMissing
+      - equal:
+          path: spec.groups[0].rules[4].alert
+          value: KvrocksBackgroundErrors
+      - equal:
+          path: spec.groups[0].rules[5].alert
+          value: KvrocksDiskUsageHigh
+      - equal:
+          path: spec.groups[0].rules[6].alert
+          value: KvrocksWriteEndpointDown
+
+  - it: has no KvrocksReplicasMissing alert in standalone mode
+    set:
+      metrics.prometheusRule.enabled: true
+      architecture: standalone
+    asserts:
+      - notContains:
+          path: spec.groups[0].rules
+          content:
+            alert: KvrocksReplicasMissing
+          any: true
+
+  - it: has no KvrocksWriteEndpointDown alert in standalone mode
+    set:
+      metrics.prometheusRule.enabled: true
+      architecture: standalone
+    asserts:
+      - notContains:
+          path: spec.groups[0].rules
+          content:
+            alert: KvrocksWriteEndpointDown
+          any: true
+
+  - it: has no KvrocksWriteEndpointDown alert in replication mode without HAProxy
+    set:
+      metrics.prometheusRule.enabled: true
+      haproxy.enabled: false
+    asserts:
+      - notContains:
+          path: spec.groups[0].rules
+          content:
+            alert: KvrocksWriteEndpointDown
+          any: true
+
+  - it: keeps the KvrocksReplicasMissing alert in replication mode without HAProxy
+    set:
+      metrics.prometheusRule.enabled: true
+      haproxy.enabled: false
+    asserts:
+      - contains:
+          path: spec.groups[0].rules
+          content:
+            alert: KvrocksReplicasMissing
+          any: true
+
+  # --- Series selectors ---
+
+  - it: selects the Kvrocks series by namespace and headless Service
+    set:
+      metrics.prometheusRule.enabled: true
+    asserts:
+      - equal:
+          path: spec.groups[0].rules[?(@.alert == "KvrocksInstanceDown")].expr
+          value: up{namespace="data", service="db-kvrocks-headless"} == 0 or kvrocks_up{namespace="data", service="db-kvrocks-headless"} == 0
+      - equal:
+          path: spec.groups[0].rules[?(@.alert == "KvrocksMasterCountWrong")].expr
+          value: (count(kvrocks_instance_info{namespace="data", service="db-kvrocks-headless", role="master"}) or vector(0)) != 1
+      - equal:
+          path: spec.groups[0].rules[?(@.alert == "KvrocksReplicationBroken")].expr
+          value: kvrocks_master_link_up{namespace="data", service="db-kvrocks-headless"} == 0
+      - equal:
+          path: spec.groups[0].rules[?(@.alert == "KvrocksReplicasMissing")].expr
+          value: (count(kvrocks_master_link_up{namespace="data", service="db-kvrocks-headless"} == 1) or vector(0)) < 2
+      - equal:
+          path: spec.groups[0].rules[?(@.alert == "KvrocksBackgroundErrors")].expr
+          value: kvrocks_num_background_errors{namespace="data", service="db-kvrocks-headless"} > 0
+      - equal:
+          path: spec.groups[0].rules[?(@.alert == "KvrocksDiskUsageHigh")].expr
+          value: kvrocks_used_disk_size{namespace="data", service="db-kvrocks-headless"} / kvrocks_disk_capacity_bytes{namespace="data", service="db-kvrocks-headless"} > 0.8
+
+  - it: selects the HAProxy series by namespace and HAProxy metrics Service
+    set:
+      metrics.prometheusRule.enabled: true
+    asserts:
+      - equal:
+          path: spec.groups[0].rules[?(@.alert == "KvrocksWriteEndpointDown")].expr
+          value: (max(haproxy_backend_active_servers{namespace="data", service="db-kvrocks-haproxy-metrics", proxy=~"kvrocks_[0-9]+"}) or vector(0)) < 1
+
+  - it: follows the release namespace in the series selectors
+    release:
+      name: db
+      namespace: storage
+    set:
+      metrics.prometheusRule.enabled: true
+    asserts:
+      - equal:
+          path: spec.groups[0].rules[?(@.alert == "KvrocksReplicationBroken")].expr
+          value: kvrocks_master_link_up{namespace="storage", service="db-kvrocks-headless"} == 0
+      - equal:
+          path: spec.groups[0].rules[?(@.alert == "KvrocksWriteEndpointDown")].expr
+          value: (max(haproxy_backend_active_servers{namespace="storage", service="db-kvrocks-haproxy-metrics", proxy=~"kvrocks_[0-9]+"}) or vector(0)) < 1
+
+  # --- Thresholds ---
+
+  - it: fires KvrocksReplicasMissing below replicaCount - 1 healthy replicas
+    set:
+      metrics.prometheusRule.enabled: true
+      replicaCount: 5
+    asserts:
+      - equal:
+          path: spec.groups[0].rules[?(@.alert == "KvrocksReplicasMissing")].expr
+          value: (count(kvrocks_master_link_up{namespace="data", service="db-kvrocks-headless"} == 1) or vector(0)) < 4
+
+  - it: fires KvrocksDiskUsageHigh above metrics.prometheusRule.diskUsageThreshold
+    set:
+      metrics.prometheusRule.enabled: true
+      metrics.prometheusRule.diskUsageThreshold: 0.9
+    asserts:
+      - matchRegex:
+          path: spec.groups[0].rules[?(@.alert == "KvrocksDiskUsageHigh")].expr
+          pattern: ' > 0\.9$'
+
+  # `rules[*]` yields one value per alert, and the assertion must hold for each of them.
+  - it: waits metrics.prometheusRule.forMinutes before any alert fires
+    set:
+      metrics.prometheusRule.enabled: true
+      metrics.prometheusRule.forMinutes: 5
+    asserts:
+      - equal:
+          path: spec.groups[0].rules[*].for
+          value: 5m
+
+  - it: adds metrics.prometheusRule.alertLabels to every alert
+    set:
+      metrics.prometheusRule.enabled: true
+      metrics.prometheusRule.alertLabels:
+        team: database
+    asserts:
+      - isSubset:
+          path: spec.groups[0].rules[*].labels
+          content:
+            team: database

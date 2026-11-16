@@ -1,0 +1,8 @@
+# From a values file, YAML numbers reach the templates as floats: `--set` would not show the bug.
+config:
+  rocksdb.blob_file_size: 268435456
+  max-replication-mb: 0.5
+haproxy:
+  maxConnections: 1000000
+sentinel:
+  failoverTimeoutMilliseconds: 1200000

@@ -1,0 +1,312 @@
+suite: NetworkPolicy
+templates:
+  - networkpolicy.yaml
+release:
+  name: db
+  namespace: data
+set:
+  auth.password: test-password
+tests:
+  # --- Which policies exist ---
+
+  - it: is absent by default
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: creates one policy for the kvrocks pods and one for the HAProxy pods in replication mode
+    set:
+      networkPolicy.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 2
+      - containsDocument:
+          kind: NetworkPolicy
+          apiVersion: networking.k8s.io/v1
+          name: db-kvrocks
+          any: true
+      - containsDocument:
+          kind: NetworkPolicy
+          apiVersion: networking.k8s.io/v1
+          name: db-kvrocks-haproxy
+          any: true
+
+  - it: creates only the kvrocks policy in standalone mode
+    set:
+      networkPolicy.enabled: true
+      architecture: standalone
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: metadata.name
+          value: db-kvrocks
+
+  - it: creates only the kvrocks policy in replication mode without HAProxy
+    set:
+      networkPolicy.enabled: true
+      haproxy.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: metadata.name
+          value: db-kvrocks
+
+  # --- Policy of the kvrocks pods ---
+
+  - it: restricts ingress to the kvrocks pods
+    set:
+      networkPolicy.enabled: true
+    documentSelector:
+      path: metadata.name
+      value: db-kvrocks
+    asserts:
+      - equal:
+          path: spec.podSelector.matchLabels
+          value:
+            app.kubernetes.io/name: kvrocks
+            app.kubernetes.io/instance: db
+            app.kubernetes.io/component: kvrocks
+      - equal:
+          path: spec.policyTypes
+          value: [Ingress]
+
+  - it: lets the kvrocks and HAProxy pods reach the kvrocks and sentinel ports
+    set:
+      networkPolicy.enabled: true
+    documentSelector:
+      path: metadata.name
+      value: db-kvrocks
+    asserts:
+      - equal:
+          path: spec.ingress[0]
+          value:
+            from:
+              - podSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: kvrocks
+                    app.kubernetes.io/instance: db
+                    app.kubernetes.io/component: kvrocks
+              - podSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: kvrocks
+                    app.kubernetes.io/instance: db
+                    app.kubernetes.io/component: haproxy
+            ports:
+              - port: 6379
+              - port: 26379
+
+  - it: opens the kvrocks and sentinel ports to any client by default
+    set:
+      networkPolicy.enabled: true
+    documentSelector:
+      path: metadata.name
+      value: db-kvrocks
+    asserts:
+      - equal:
+          path: spec.ingress[1]
+          value:
+            ports:
+              - port: 6379
+              - port: 26379
+
+  - it: restricts the clients of the kvrocks pods to networkPolicy.clientsFrom
+    set:
+      networkPolicy.enabled: true
+      networkPolicy.clientsFrom:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: apps
+    documentSelector:
+      path: metadata.name
+      value: db-kvrocks
+    asserts:
+      - equal:
+          path: spec.ingress[1]
+          value:
+            ports:
+              - port: 6379
+              - port: 26379
+            from:
+              - namespaceSelector:
+                  matchLabels:
+                    kubernetes.io/metadata.name: apps
+
+  - it: opens the exporter port to any scraper by default
+    set:
+      networkPolicy.enabled: true
+    documentSelector:
+      path: metadata.name
+      value: db-kvrocks
+    asserts:
+      - equal:
+          path: spec.ingress[2]
+          value:
+            ports:
+              - port: 9121
+
+  - it: restricts the scrapers of the kvrocks pods to networkPolicy.metricsFrom
+    set:
+      networkPolicy.enabled: true
+      networkPolicy.metricsFrom:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+    documentSelector:
+      path: metadata.name
+      value: db-kvrocks
+    asserts:
+      - equal:
+          path: spec.ingress[2]
+          value:
+            ports:
+              - port: 9121
+            from:
+              - namespaceSelector:
+                  matchLabels:
+                    kubernetes.io/metadata.name: monitoring
+
+  - it: opens no exporter port on the kvrocks pods when metrics are disabled
+    set:
+      networkPolicy.enabled: true
+      metrics.enabled: false
+    documentSelector:
+      path: metadata.name
+      value: db-kvrocks
+    asserts:
+      - lengthEqual:
+          path: spec.ingress
+          count: 2
+      - notContains:
+          path: spec.ingress
+          content:
+            ports:
+              - port: 9121
+
+  - it: opens only the kvrocks and exporter ports in standalone mode
+    set:
+      networkPolicy.enabled: true
+      architecture: standalone
+    asserts:
+      - equal:
+          path: spec.ingress
+          value:
+            - ports:
+                - port: 6379
+            - ports:
+                - port: 9121
+
+  # --- Policy of the HAProxy pods ---
+
+  - it: restricts ingress to the HAProxy pods
+    set:
+      networkPolicy.enabled: true
+    documentSelector:
+      path: metadata.name
+      value: db-kvrocks-haproxy
+    asserts:
+      - equal:
+          path: spec.podSelector.matchLabels
+          value:
+            app.kubernetes.io/name: kvrocks
+            app.kubernetes.io/instance: db
+            app.kubernetes.io/component: haproxy
+      - equal:
+          path: spec.policyTypes
+          value: [Ingress]
+
+  - it: opens the write port of HAProxy to any client by default
+    set:
+      networkPolicy.enabled: true
+    documentSelector:
+      path: metadata.name
+      value: db-kvrocks-haproxy
+    asserts:
+      - equal:
+          path: spec.ingress[0]
+          value:
+            ports:
+              - port: 6379
+
+  - it: restricts the clients of HAProxy to networkPolicy.clientsFrom
+    set:
+      networkPolicy.enabled: true
+      networkPolicy.clientsFrom:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: apps
+    documentSelector:
+      path: metadata.name
+      value: db-kvrocks-haproxy
+    asserts:
+      - equal:
+          path: spec.ingress[0]
+          value:
+            ports:
+              - port: 6379
+            from:
+              - namespaceSelector:
+                  matchLabels:
+                    kubernetes.io/metadata.name: apps
+
+  - it: opens the metrics port of HAProxy to any scraper by default
+    set:
+      networkPolicy.enabled: true
+    documentSelector:
+      path: metadata.name
+      value: db-kvrocks-haproxy
+    asserts:
+      - equal:
+          path: spec.ingress[1]
+          value:
+            ports:
+              - port: 8888
+
+  - it: restricts the scrapers of HAProxy to networkPolicy.metricsFrom
+    set:
+      networkPolicy.enabled: true
+      networkPolicy.metricsFrom:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+    documentSelector:
+      path: metadata.name
+      value: db-kvrocks-haproxy
+    asserts:
+      - equal:
+          path: spec.ingress[1]
+          value:
+            ports:
+              - port: 8888
+            from:
+              - namespaceSelector:
+                  matchLabels:
+                    kubernetes.io/metadata.name: monitoring
+
+  - it: opens no metrics port on HAProxy when metrics are disabled
+    set:
+      networkPolicy.enabled: true
+      metrics.enabled: false
+    documentSelector:
+      path: metadata.name
+      value: db-kvrocks-haproxy
+    asserts:
+      - equal:
+          path: spec.ingress
+          value:
+            - ports:
+                - port: 6379
+
+  - it: opens the ports by number, as a named port on a sidecar is not resolved everywhere
+    set:
+      networkPolicy.enabled: true
+      port: 6380
+      sentinel.port: 26380
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: spec.ingress[0].ports
+          value:
+            - port: 6380
+            - port: 26380

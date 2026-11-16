@@ -1,0 +1,49 @@
+suite: ConfigMap - scripts
+templates:
+  - scripts-configmap.yaml
+release:
+  name: db
+  namespace: data
+set:
+  auth.password: test-password
+tests:
+  - it: carries a hash of its content in its name, and never changes in place
+    asserts:
+      - isKind:
+          of: ConfigMap
+      - matchRegex:
+          path: metadata.name
+          pattern: ^db-kvrocks-scripts-[0-9a-f]{7}$
+      - equal:
+          path: immutable
+          value: true
+
+  - it: ships the entrypoints, probes and preStop hooks the StatefulSet runs
+    asserts:
+      - exists:
+          path: data["kvrocks-start.sh"]
+      - exists:
+          path: data["kvrocks-probe.sh"]
+      - exists:
+          path: data["kvrocks-prestop.sh"]
+      - exists:
+          path: data["sentinel-start.sh"]
+      - exists:
+          path: data["sentinel-probe.sh"]
+      - exists:
+          path: data["kvrocks-fence.sh"]
+
+  - it: ships the scripts those entrypoints and hooks call
+    asserts:
+      - exists:
+          path: data["common.sh"]
+      - exists:
+          path: data["kvrocks-switchover.sh"]
+      - exists:
+          path: data["sentinel-reconfig.sh"]
+
+  - it: renders a script from its first line, the shebang
+    asserts:
+      - matchRegex:
+          path: data["kvrocks-start.sh"]
+          pattern: ^#!/bin/sh\n

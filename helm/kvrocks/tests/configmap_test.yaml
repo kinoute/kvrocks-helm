@@ -1,0 +1,130 @@
+suite: ConfigMap - kvrocks.conf
+templates:
+  - configmap.yaml
+release:
+  name: db
+  namespace: data
+set:
+  auth.password: test-password
+tests:
+  - it: is named after the release, where the StatefulSet mounts it from
+    asserts:
+      - isKind:
+          of: ConfigMap
+      - equal:
+          path: metadata.name
+          value: db-kvrocks
+
+  - it: writes the settings the chart owns
+    asserts:
+      - matchRegex:
+          path: data["kvrocks.conf"]
+          pattern: (?m)^bind 0\.0\.0\.0$
+      - matchRegex:
+          path: data["kvrocks.conf"]
+          pattern: (?m)^port 6379$
+      - matchRegex:
+          path: data["kvrocks.conf"]
+          pattern: (?m)^dir /var/lib/kvrocks$
+      - matchRegex:
+          path: data["kvrocks.conf"]
+          pattern: (?m)^pidfile /tmp/kvrocks\.pid$
+      - matchRegex:
+          path: data["kvrocks.conf"]
+          pattern: (?m)^log-dir stdout$
+      - matchRegex:
+          path: data["kvrocks.conf"]
+          pattern: (?m)^daemonize no$
+      - matchRegex:
+          path: data["kvrocks.conf"]
+          pattern: (?m)^cluster-enabled no$
+
+  - it: listens on the port set in values
+    set:
+      port: 6380
+    asserts:
+      - matchRegex:
+          path: data["kvrocks.conf"]
+          pattern: (?m)^port 6380$
+
+  - it: enables use-rsid-psync by default
+    asserts:
+      - matchRegex:
+          path: data["kvrocks.conf"]
+          pattern: (?m)^use-rsid-psync yes$
+
+  - it: renders each config entry as a "key value" line
+    set:
+      config:
+        workers: 16
+        rocksdb.compression: zstd
+    asserts:
+      - matchRegex:
+          path: data["kvrocks.conf"]
+          pattern: (?m)^workers 16$
+      - matchRegex:
+          path: data["kvrocks.conf"]
+          pattern: (?m)^rocksdb\.compression zstd$
+
+  - it: keeps the default config entries next to the ones added
+    set:
+      config:
+        workers: 16
+    asserts:
+      - matchRegex:
+          path: data["kvrocks.conf"]
+          pattern: (?m)^use-rsid-psync yes$
+
+  - it: renders a true boolean as yes
+    set:
+      config:
+        resp3-enabled: true
+    asserts:
+      - matchRegex:
+          path: data["kvrocks.conf"]
+          pattern: (?m)^resp3-enabled yes$
+
+  - it: renders a false boolean as no
+    set:
+      config:
+        use-rsid-psync: false
+    asserts:
+      - matchRegex:
+          path: data["kvrocks.conf"]
+          pattern: (?m)^use-rsid-psync no$
+
+  # Helm reads an unquoted integer as a float, and one of a million or more comes out in
+  # scientific notation (2.68435456e+08). Quoting it is the way to write one today.
+  - it: renders a quoted number exactly as written
+    set:
+      config:
+        rocksdb.blob_file_size: "268435456"
+    asserts:
+      - matchRegex:
+          path: data["kvrocks.conf"]
+          pattern: (?m)^rocksdb\.blob_file_size 268435456$
+
+  - it: keeps the password out of kvrocks.conf
+    asserts:
+      - notMatchRegex:
+          path: data["kvrocks.conf"]
+          pattern: test-password
+      - notMatchRegex:
+          path: data["kvrocks.conf"]
+          pattern: (?m)^(requirepass|masterauth)\b
+
+  - it: writes a large integer in full, not in scientific notation
+    values:
+      - values/large-numbers.yaml
+    asserts:
+      - matchRegex:
+          path: data["kvrocks.conf"]
+          pattern: (?m)^rocksdb\.blob_file_size 268435456$
+
+  - it: keeps the decimals of a fractional setting
+    values:
+      - values/large-numbers.yaml
+    asserts:
+      - matchRegex:
+          path: data["kvrocks.conf"]
+          pattern: (?m)^max-replication-mb 0\.5$

@@ -1,0 +1,314 @@
+suite: HAProxy - Deployment
+templates:
+  - haproxy/deployment.yaml
+  # Not asserted on: the Deployment includes it to compute its checksum annotation,
+  # and helm-unittest only renders the templates listed here.
+  - haproxy/configmap.yaml
+release:
+  name: db
+  namespace: data
+set:
+  auth.password: test-password
+tests:
+  # --- Presence ---
+
+  - it: is deployed in replication mode
+    template: haproxy/deployment.yaml
+    asserts:
+      - isKind:
+          of: Deployment
+      - equal:
+          path: metadata.name
+          value: db-kvrocks-haproxy
+
+  - it: is absent in standalone mode
+    template: haproxy/deployment.yaml
+    set:
+      architecture: standalone
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: is absent when HAProxy is disabled
+    template: haproxy/deployment.yaml
+    set:
+      haproxy.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  # --- Replicas and rollout ---
+
+  - it: runs 2 replicas by default
+    template: haproxy/deployment.yaml
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 2
+
+  - it: runs haproxy.replicaCount replicas
+    template: haproxy/deployment.yaml
+    set:
+      haproxy.replicaCount: 4
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 4
+
+  - it: adds a pod before it removes one during a rollout
+    template: haproxy/deployment.yaml
+    asserts:
+      - equal:
+          path: spec.strategy
+          value:
+            type: RollingUpdate
+            rollingUpdate:
+              maxUnavailable: 0
+              maxSurge: 1
+
+  - it: selects its pods by name, instance and component
+    template: haproxy/deployment.yaml
+    asserts:
+      - equal:
+          path: spec.selector.matchLabels
+          value:
+            app.kubernetes.io/name: kvrocks
+            app.kubernetes.io/instance: db
+            app.kubernetes.io/component: haproxy
+      - isSubset:
+          path: spec.template.metadata.labels
+          content:
+            app.kubernetes.io/name: kvrocks
+            app.kubernetes.io/instance: db
+            app.kubernetes.io/component: haproxy
+
+  - it: annotates the pods with a checksum of haproxy.cfg
+    template: haproxy/deployment.yaml
+    asserts:
+      - matchRegex:
+          path: spec.template.metadata.annotations["checksum/config"]
+          pattern: ^[0-9a-f]{64}$
+
+  # --- Container ---
+
+  - it: uses the tag set in haproxy.image.tag
+    template: haproxy/deployment.yaml
+    set:
+      haproxy.image.tag: 3.0.0-alpine
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: docker.io/haproxy:3.0.0-alpine
+
+  - it: replaces the image registry with global.imageRegistry
+    template: haproxy/deployment.yaml
+    set:
+      global.imageRegistry: registry.example.com
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].image
+          pattern: '^registry\.example\.com/haproxy:'
+
+  - it: exposes the write port and the health port
+    template: haproxy/deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].ports
+          value:
+            - name: kvrocks
+              containerPort: 6379
+            - name: http
+              containerPort: 8888
+
+  - it: follows port and haproxy.healthPort in the container ports
+    template: haproxy/deployment.yaml
+    set:
+      port: 6380
+      haproxy.healthPort: 9000
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].ports
+          value:
+            - name: kvrocks
+              containerPort: 6380
+            - name: http
+              containerPort: 9000
+
+  - it: mounts haproxy.cfg from its ConfigMap
+    template: haproxy/deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.volumes
+          value:
+            - name: config
+              configMap:
+                name: db-kvrocks-haproxy
+      - equal:
+          path: spec.template.spec.containers[0].volumeMounts
+          value:
+            - name: config
+              mountPath: /usr/local/etc/haproxy
+              readOnly: true
+
+  # --- Probes ---
+
+  - it: is alive while HAProxy answers /livez
+    template: haproxy/deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.httpGet
+          value:
+            path: /livez
+            port: http
+
+  - it: is ready while HAProxy answers /readyz
+    template: haproxy/deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet
+          value:
+            path: /readyz
+            port: http
+
+  - it: applies probe timings from values next to the HTTP check
+    template: haproxy/deployment.yaml
+    set:
+      haproxy.readinessProbe:
+        periodSeconds: 3
+        timeoutSeconds: 1
+        failureThreshold: 4
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe
+          value:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 3
+            timeoutSeconds: 1
+            failureThreshold: 4
+
+  # --- Password ---
+
+  - it: reads KVROCKS_PASSWORD from the Secret of the chart
+    template: haproxy/deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].env
+          value:
+            - name: KVROCKS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: db-kvrocks
+                  key: password
+
+  - it: reads KVROCKS_PASSWORD from auth.existingSecret and auth.secretKey
+    template: haproxy/deployment.yaml
+    set:
+      auth.password: ""
+      auth.existingSecret: my-credentials
+      auth.secretKey: kvrocks-password
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].env
+          value:
+            - name: KVROCKS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: my-credentials
+                  key: kvrocks-password
+
+  - it: has no environment at all when auth is disabled
+    template: haproxy/deployment.yaml
+    set:
+      auth.enabled: false
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[0].env
+
+  - it: never passes the password on a command line
+    template: haproxy/deployment.yaml
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[0].command
+      - notExists:
+          path: spec.template.spec.containers[0].args
+
+  # --- Security ---
+
+  - it: runs the pod as a non-root user with the default seccomp profile
+    template: haproxy/deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext
+          value:
+            runAsNonRoot: true
+            runAsUser: 99
+            runAsGroup: 99
+            seccompProfile:
+              type: RuntimeDefault
+
+  - it: drops all capabilities and locks the root filesystem
+    template: haproxy/deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].securityContext
+          value:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+
+  - it: does not mount the service account token
+    template: haproxy/deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: false
+
+  - it: runs as the ServiceAccount of the chart
+    template: haproxy/deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.serviceAccountName
+          value: db-kvrocks
+
+  # --- Affinity ---
+
+  - it: prefers one HAProxy pod per node by default
+    template: haproxy/deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.affinity
+          value:
+            podAntiAffinity:
+              preferredDuringSchedulingIgnoredDuringExecution:
+                - weight: 100
+                  podAffinityTerm:
+                    topologyKey: kubernetes.io/hostname
+                    labelSelector:
+                      matchLabels:
+                        app.kubernetes.io/name: kvrocks
+                        app.kubernetes.io/instance: db
+                        app.kubernetes.io/component: haproxy
+
+  - it: replaces the default anti-affinity with haproxy.affinity
+    template: haproxy/deployment.yaml
+    set:
+      haproxy.affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: example.com/edge
+                    operator: Exists
+    asserts:
+      - equal:
+          path: spec.template.spec.affinity
+          value:
+            nodeAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                nodeSelectorTerms:
+                  - matchExpressions:
+                      - key: example.com/edge
+                        operator: Exists

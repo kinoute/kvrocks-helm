@@ -1,0 +1,126 @@
+suite: ServiceMonitor
+templates:
+  - servicemonitor.yaml
+release:
+  name: db
+  namespace: data
+set:
+  auth.password: test-password
+tests:
+  - it: is absent by default
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: is created when metrics.serviceMonitor is enabled
+    set:
+      metrics.serviceMonitor.enabled: true
+    asserts:
+      - isKind:
+          of: ServiceMonitor
+      - isAPIVersion:
+          of: monitoring.coreos.com/v1
+      - equal:
+          path: metadata.name
+          value: db-kvrocks
+
+  - it: is absent when metrics are disabled, even if it is enabled itself
+    set:
+      metrics.enabled: false
+      metrics.serviceMonitor.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: carries the labels Prometheus selects ServiceMonitors by
+    set:
+      metrics.serviceMonitor.enabled: true
+      metrics.serviceMonitor.labels:
+        release: prometheus
+    asserts:
+      - isSubset:
+          path: metadata.labels
+          content:
+            release: prometheus
+            app.kubernetes.io/name: kvrocks
+            app.kubernetes.io/instance: db
+
+  - it: scrapes the Services of the release, in the namespace of the release
+    set:
+      metrics.serviceMonitor.enabled: true
+    asserts:
+      - equal:
+          path: spec.namespaceSelector.matchNames
+          value: [data]
+      - equal:
+          path: spec.selector.matchLabels
+          value:
+            app.kubernetes.io/name: kvrocks
+            app.kubernetes.io/instance: db
+
+  - it: scrapes the port named metrics
+    set:
+      metrics.serviceMonitor.enabled: true
+    asserts:
+      - lengthEqual:
+          path: spec.endpoints
+          count: 1
+      - equal:
+          path: spec.endpoints[0].port
+          value: metrics
+
+  - it: scrapes every 30s with a 10s timeout by default
+    set:
+      metrics.serviceMonitor.enabled: true
+    asserts:
+      - equal:
+          path: spec.endpoints[0].interval
+          value: 30s
+      - equal:
+          path: spec.endpoints[0].scrapeTimeout
+          value: 10s
+
+  - it: uses the interval and the timeout set in values
+    set:
+      metrics.serviceMonitor.enabled: true
+      metrics.serviceMonitor.interval: 15s
+      metrics.serviceMonitor.scrapeTimeout: 5s
+    asserts:
+      - equal:
+          path: spec.endpoints[0].interval
+          value: 15s
+      - equal:
+          path: spec.endpoints[0].scrapeTimeout
+          value: 5s
+
+  - it: renders no relabeling by default
+    set:
+      metrics.serviceMonitor.enabled: true
+    asserts:
+      - notExists:
+          path: spec.endpoints[0].relabelings
+      - notExists:
+          path: spec.endpoints[0].metricRelabelings
+
+  - it: renders relabelings and metricRelabelings as given
+    set:
+      metrics.serviceMonitor.enabled: true
+      metrics.serviceMonitor.relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node
+      metrics.serviceMonitor.metricRelabelings:
+        - action: drop
+          sourceLabels: [__name__]
+          regex: go_.*
+    asserts:
+      - equal:
+          path: spec.endpoints[0].relabelings
+          value:
+            - sourceLabels: [__meta_kubernetes_pod_node_name]
+              targetLabel: node
+      - equal:
+          path: spec.endpoints[0].metricRelabelings
+          value:
+            - action: drop
+              sourceLabels: [__name__]
+              regex: go_.*
