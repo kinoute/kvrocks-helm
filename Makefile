@@ -1,5 +1,6 @@
 CHART := helm/kvrocks
-SCRIPTS := $(CHART)/files/scripts/*.sh tests/e2e/*.sh tests/prometheus/run.sh
+SCRIPTS := $(CHART)/files/scripts/*.sh tests/e2e/*.sh tests/prometheus/run.sh \
+	tests/scripts/run.sh tests/scripts/harness.sh tests/scripts/fake/*
 LOADGEN := tests/e2e/loadgen
 
 # Every optional resource switched on, so that the schemas of all of them are checked.
@@ -14,14 +15,18 @@ KUBECONFORM := kubeconform -strict -summary -schema-location default -schema-loc
 # volume losses only run in the full suite.
 QUICK_SCENARIOS := install switchover rolling_update master_pod_crash helm_test
 
-.PHONY: test lint schema manifests unit rules loadgen e2e e2e-quick
+.PHONY: test lint schema manifests unit scripts rules loadgen e2e e2e-quick
 
-test: lint manifests unit rules loadgen ## Everything except the end-to-end scenarios
+test: lint manifests unit scripts rules loadgen ## Everything except the end-to-end scenarios
 
-lint: schema ## Shell scripts, chart, and a values schema in sync with values.yaml
+lint: ## Shell scripts, chart, and a values schema in sync with values.yaml
 	shellcheck $(SCRIPTS)
 	helm lint $(CHART) --set auth.password=lint
-	git diff --exit-code -- $(CHART)/values.schema.json
+	mkdir -p .e2e
+	cd $(CHART) && helm schema -input values.yaml -output $(CURDIR)/.e2e/values.schema.json \
+		-noAdditionalProperties true -indent 2 >/dev/null
+	diff -u $(CHART)/values.schema.json .e2e/values.schema.json || \
+		{ echo "values.schema.json is out of date: run make schema"; exit 1; }
 
 schema: ## Regenerates values.schema.json from the annotations in values.yaml
 	cd $(CHART) && helm schema -input values.yaml -output values.schema.json \
@@ -33,6 +38,9 @@ manifests: ## Rendered manifests against the Kubernetes and Prometheus Operator 
 
 unit: ## helm-unittest suites
 	helm unittest $(CHART)
+
+scripts: ## Unit tests of the pod scripts against a fake redis-cli, in their own images (needs docker)
+	tests/scripts/run.sh
 
 rules: ## Unit tests of the alert rules
 	tests/prometheus/run.sh

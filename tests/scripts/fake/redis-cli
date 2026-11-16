@@ -1,0 +1,59 @@
+#!/bin/sh
+# Stand-in for redis-cli, driven by a directory that describes the world ($WORLD).
+#
+# $WORLD/<host>:<port>/          one directory per reachable server
+#   down                         present: connection refused
+#   hang                         present: never answers (the caller's timeout fires)
+#   <command words joined by _>  the reply, printed as is; the longest matching prefix
+#                                of the command wins, so `client_pause` answers
+#                                `CLIENT PAUSE 5000 WRITE`. An executable file is run
+#                                instead, with the command as arguments.
+# A hostname listed in $WORLD/dns (see fake getent) is reached at its address.
+# Every call is appended to $WORLD/calls as "<host>:<port> <command>", with the host as given.
+host=localhost
+port=6379
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h) host=$2; shift 2 ;;
+    -p) port=$2; shift 2 ;;
+    -*) shift ;;
+    *) break ;;
+  esac
+done
+
+echo "$host:$port $*" >>"$WORLD/calls"
+
+# A name with an entry in $WORLD/dns is reached at that address, like a real client would.
+if [ -f "$WORLD/dns/$host" ]; then
+  if [ -e "$WORLD/dns-down" ]; then
+    echo "Could not connect to Redis at $host:$port: Name or service not known" >&2
+    exit 1
+  fi
+  host=$(cat "$WORLD/dns/$host")
+fi
+server="$WORLD/$host:$port"
+
+if [ ! -d "$server" ] || [ -e "$server/down" ]; then
+  echo "Could not connect to Redis at $host:$port: Connection refused" >&2
+  exit 1
+fi
+if [ -e "$server/hang" ]; then
+  sleep 3600
+fi
+
+key=$(printf '%s\n' "$*" | tr '[:upper:]' '[:lower:]' | tr ' ' '_')
+while [ -n "$key" ]; do
+  reply="$server/$key"
+  if [ -x "$reply" ]; then
+    exec sh "$reply" "$@"
+  fi
+  if [ -f "$reply" ]; then
+    cat "$reply"
+    exit 0
+  fi
+  case "$key" in
+    *_*) key=${key%_*} ;;
+    *) key="" ;;
+  esac
+done
+echo "ERR unknown command '$1'"

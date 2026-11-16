@@ -1,0 +1,5 @@
+#!/bin/sh
+# Stand-in for the kvrocks server: prints the replication role it was configured with.
+conf=$2
+role=$(awk '$1 == "slaveof" { print "replica of " $2 }' "$conf")
+echo "${role:-master}"

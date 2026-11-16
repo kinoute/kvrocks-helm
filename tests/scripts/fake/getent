@@ -1,0 +1,9 @@
+#!/bin/sh
+# Stand-in for `getent hosts <name>`: $WORLD/dns/<name> holds the address.
+# $WORLD/dns-down present: no answer at all (the caller's timeout fires).
+[ "$1" = "hosts" ] || exit 2
+if [ -e "$WORLD/dns-down" ]; then
+  sleep 3600
+fi
+[ -f "$WORLD/dns/$2" ] || exit 2
+printf '%s %s\n' "$(cat "$WORLD/dns/$2")" "$2"
