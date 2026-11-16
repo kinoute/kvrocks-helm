@@ -101,6 +101,23 @@ test_a_pause_is_renewed_before_it_runs_out_with_five_pods() {
   assert_no_gap_between_pauses
 }
 
+test_a_refused_pause_is_reported_and_tried_again() {
+  healthy_master
+  reply localhost:6379 "client pause" "ERR unknown subcommand 'pause'"
+  start_fence
+  sleep 2
+  down 10.0.0.1:26379
+  down 10.0.0.2:26379
+  sleep 4
+  stop_fence
+  grep -q 'refused to pause writes' "$WORLD/fence.log" || fail "no warning; log was:
+$(cat "$WORLD/fence.log")"
+  if grep -q 'writes paused' "$WORLD/fence.log"; then
+    fail "the log claims writes are paused"
+  fi
+  [ "$(calls | grep -c -F 'localhost:6379 client pause')" -ge 2 ] || fail "the pause was not tried again"
+}
+
 test_a_master_never_confirmed_is_not_paused() {
   healthy_master
   down 10.0.0.1:26379
