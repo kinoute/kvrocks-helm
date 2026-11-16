@@ -152,6 +152,8 @@ kubectl exec <master pod> -c kvrocks -- /scripts/kvrocks-switchover.sh
 
 If it prints `handed the master role over to ...`, the master has moved and no acknowledged write was lost. If it gives up, a replica was behind or Sentinel refused: writes resume on the same master and nothing changed.
 
+`--to <pod>` picks the pod that becomes master, for instance before [a Kvrocks upgrade](#upgrading-kvrocks). Run on a pod that is not the master, the script does nothing and says which pod the Sentinels name.
+
 The output of the handovers run by the `preStop` hook is not in the container logs. Each pod keeps its last ones on its volume:
 
 ```bash
@@ -200,6 +202,23 @@ The chart does not take backups. Two ways that fit it:
 - A job that attaches to the write endpoint's master as an extra replica, waits for the sync, and copies the files. Start it with `slave-priority 0`, or Sentinel may promote it.
 
 To restore, follow the migration above with the backup as the data.
+
+### Upgrading Kvrocks
+
+1. Read the release notes of every version in between, for a change in the data format or in replication. Kvrocks publishes no compatibility promise between versions, and going back to an older version is not supported.
+2. Move the master to pod 0, the one the rolling update restarts last:
+
+   ```bash
+   kubectl exec <master pod> -c kvrocks -- /scripts/kvrocks-switchover.sh --to db-kvrocks-0
+   ```
+
+3. Change `image.tag`, or upgrade to a chart whose `appVersion` is the new version, and run `helm upgrade`.
+
+Why pod 0: Kubernetes restarts the pods from the highest ordinal down. The replicas get the new version first, while they replicate from the old master, then pod 0 hands its role over to one of them and restarts last. A replica never runs an older version than its master, the direction a new version is the least likely to support. Left to itself, Sentinel promotes any up-to-date replica, whatever its version.
+
+Expect three restarts and one handover, without a full sync. Scenario `kvrocks_upgrade` does exactly this from 2.16.0 to 2.17.0 under load: on Kind with TLS, 452 270 acknowledged writes, none lost, and 3.6 s at most without one.
+
+The Sentinel image is part of the same StatefulSet and goes through the same rolling update. HAProxy is a Deployment: its rolling restart loses nothing either (scenario `haproxy_restart`).
 
 ### Rotating the password
 
