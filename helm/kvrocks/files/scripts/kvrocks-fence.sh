@@ -109,7 +109,15 @@ is_followed() {
 }
 
 fence() {
-  kv_cli localhost client pause "$FENCE_PAUSE_MS" write >/dev/null || true
+  local reply
+  reply=$(kv_cli localhost client pause "$FENCE_PAUSE_MS" write | tr -d '\r')
+  # redis-cli exits 0 on an error reply: only the reply tells a refused pause, from a
+  # Kvrocks without CLIENT PAUSE WRITE for instance. No reply at all is a Kvrocks that does
+  # not answer, which may have paused anyway. Either way, the next check pauses again.
+  if [ -n "$reply" ] && [ "$reply" != OK ]; then
+    log "WARNING: neither a majority of Sentinels nor of replicas follows this pod, and Kvrocks refused to pause writes: $reply"
+    return 0
+  fi
   if [ "$fenced" = no ]; then
     log "neither a majority of Sentinels nor of replicas follows this pod: writes paused"
     fenced=yes
