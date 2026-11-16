@@ -158,8 +158,18 @@ majority_master() { # $1: ordinal to skip
 }
 
 describe_cluster() {
-  local ordinal
+  local ordinal pod container
   k get pods -o wide 2>&1 | cut -c1-130
+  kubectl get nodes -o wide 2>&1 | cut -c1-130
+  # Why containers restarted, and what they said last.
+  for pod in $(k get pods -l "app.kubernetes.io/instance=$RELEASE" -o name 2>/dev/null); do
+    k get "$pod" -o jsonpath='{range .status.initContainerStatuses[*]}{.name} restarts={.restartCount} last={.lastState.terminated.reason}/{.lastState.terminated.exitCode} ready={.ready}{"\n"}{end}{range .status.containerStatuses[*]}{.name} restarts={.restartCount} last={.lastState.terminated.reason}/{.lastState.terminated.exitCode} ready={.ready}{"\n"}{end}' 2>/dev/null |
+      sed "s|^|  ${pod#pod/}: |"
+    for container in $(k get "$pod" -o jsonpath='{range .status.initContainerStatuses[?(@.restartCount>0)]}{.name} {end}{range .status.containerStatuses[?(@.restartCount>0)]}{.name} {end}' 2>/dev/null); do
+      k logs "$pod" -c "$container" --previous --tail=8 2>&1 | sed "s|^|    ${pod#pod/}/$container (previous): |" | cut -c1-200
+    done
+  done
+  k get events --sort-by=.lastTimestamp 2>&1 | grep -E 'Unhealthy|BackOff|Killing|Failed' | tail -12 | cut -c1-200
   # A handover that gave up leaves its reason in a FailedPreStopHook event.
   k get events --field-selector reason=FailedPreStopHook -o custom-columns=POD:.involvedObject.name,MESSAGE:.message --no-headers 2>&1 | tail -5
   for ordinal in $(ordinals); do
