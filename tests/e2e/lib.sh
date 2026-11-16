@@ -364,6 +364,8 @@ assert_report() { # $1: scenario, $2: JSON report, $3: max lost writes, $4: max 
 
   printf '    %s: acked=%s lost=%s worst_pod_missing=%s longest_write_gap=%ss errors=%s\n' \
     "$1" "$acked" "$lost" "$worst_pod" "$gap" "$(jq -c '.errors' <<<"$2")"
+  # When the writes stopped, in UTC, to be matched with the steps the scenario printed.
+  jq -r '.write_gaps // [] | .[] | "      no write from \(.at) UTC for \(.seconds)s"' <<<"$2"
 
   [ "$acked" -gt 0 ] || fail "$1: no write was acknowledged"
   [ "$lost" != "null" ] || fail "$1: the write endpoint never answered the verification"

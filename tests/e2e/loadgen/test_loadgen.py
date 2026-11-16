@@ -41,6 +41,26 @@ def test_longest_write_gap_without_any_ack_is_the_whole_run() -> None:
     assert gap == 10.0
 
 
+def test_write_gaps_lists_every_long_stretch_with_its_start() -> None:
+    # Arrange
+    ack_times = [1.0, 1.2, 4.0, 4.1, 6.5]
+
+    # Act
+    gaps = loadgen.write_gaps(ack_times, started=0.0, ended=7.0, at_least=1.0)
+
+    # Assert
+    flat = [value for gap in gaps for value in gap]
+    assert flat == pytest.approx([0.0, 1.0, 1.2, 2.8, 4.1, 2.4])
+
+
+def test_write_gaps_ignores_short_stretches() -> None:
+    # Act
+    gaps = loadgen.write_gaps([0.5, 1.0, 1.5], started=0.0, ended=2.0, at_least=1.0)
+
+    # Assert
+    assert gaps == []
+
+
 def test_count_missing_spans_several_batches() -> None:
     # Arrange
     keys = [f"k:{index}" for index in range(loadgen.VERIFY_BATCH_SIZE + 10)]

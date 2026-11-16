@@ -17,6 +17,7 @@ import threading
 import time
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Protocol
 
 import redis
@@ -28,6 +29,9 @@ PAUSE_AFTER_ERROR_SECONDS = 0.05
 VERIFY_BATCH_SIZE = 500
 VERIFY_RETRY_SECONDS = 2.0
 TLS_DIR = "/tls"
+# Stretches without writes at least this long are listed with their time, to be matched
+# with what the scenario was doing.
+REPORTED_GAP_SECONDS = 1.0
 
 
 class KeyReader(Protocol):
@@ -112,6 +116,18 @@ def longest_write_gap(ack_times: Sequence[float], started: float, ended: float) 
     return max(later - earlier for earlier, later in zip(points, points[1:], strict=False))
 
 
+def write_gaps(
+    ack_times: Sequence[float], started: float, ended: float, at_least: float
+) -> list[tuple[float, float]]:
+    """Returns (start, length) of every stretch without any acknowledged write.
+
+    Only the stretches of at least `at_least` seconds are kept.
+    """
+    points = [started, *sorted(ack_times), ended]
+    pairs = zip(points, points[1:], strict=False)
+    return [(earlier, later - earlier) for earlier, later in pairs if later - earlier >= at_least]
+
+
 def batches(keys: Sequence[str], size: int) -> Iterator[Sequence[str]]:
     """Yields the keys in chunks of at most `size`."""
     for start in range(0, len(keys), size):
@@ -182,6 +198,8 @@ def main() -> None:
 
     logs = [WorkerLog() for _ in range(args.workers)]
     started = time.monotonic()
+    # Monotonic times measure the gaps; this turns them into the time of day.
+    wall_clock_at_start = time.time()
     threads = [
         threading.Thread(
             target=write_until,
@@ -222,15 +240,24 @@ def main() -> None:
         for host in args.pod_host
     }
 
+    ack_times = [t for log in logs for t in log.ack_times]
+    gaps = [
+        {
+            "at": datetime.fromtimestamp(wall_clock_at_start + start - started, UTC).strftime(
+                "%H:%M:%S"
+            ),
+            "seconds": round(length, 2),
+        }
+        for start, length in write_gaps(ack_times, started, ended, REPORTED_GAP_SECONDS)
+    ]
     report = {
         "acked": len(acked_keys),
         "lost": lost,
         "missing_by_pod": missing_by_pod,
         "errors": errors,
         "duration_seconds": round(ended - started, 2),
-        "longest_write_gap_seconds": round(
-            longest_write_gap([t for log in logs for t in log.ack_times], started, ended), 2
-        ),
+        "longest_write_gap_seconds": round(longest_write_gap(ack_times, started, ended), 2),
+        "write_gaps": gaps,
     }
     print(json.dumps(report))
 
