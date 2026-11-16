@@ -33,7 +33,7 @@ flowchart LR
 ```
 
 - A StatefulSet of 3 pods. Each pod runs Kvrocks and `kvrocks_exporter`, with two sidecars: a Sentinel (the Valkey image) and a small fencing loop.
-- HAProxy is the write endpoint. It sends writes to the pod that a majority of Sentinels names as master, and only if that pod also reports itself as master. With no majority it refuses connections rather than guess.
+- HAProxy is the write endpoint. It sends writes to the pod that a majority of Sentinels names as master and actually reaches, with a reply to their pings in the last 2 s, and only if that pod also reports itself as master. With no such majority it refuses connections rather than guess.
 - The fencing loop pauses the writes of a master that a majority of Sentinels no longer confirms, as when it is cut off from the other pods. Kvrocks has no `min-replicas-to-write`, and without this the connections already open to such a master would keep writing to it until the partition heals. Those writes are lost when it rejoins as a replica. It reaches the other Sentinels by their last known address, so that a cluster DNS outage does not make it pause a healthy master.
 - Everything goes by pod hostnames, never by IP: pod IPs change on every restart.
 - `sentinel.conf` and a writable copy of `kvrocks.conf` live on the data volume. The role of a pod never comes from a ConfigMap, because Sentinel rewrites it at every failover.
@@ -164,7 +164,7 @@ Do not use a plain `SENTINEL FAILOVER` for that. Sentinel promotes a replica whi
 
 `KvrocksInstanceDown`, `KvrocksMasterCountWrong`, `KvrocksReplicationBroken`, `KvrocksReplicasMissing`, `KvrocksBackgroundErrors`, `KvrocksDiskUsageHigh` and `KvrocksWriteEndpointDown`. They are unit-tested with `promtool` in `tests/prometheus`.
 
-`KvrocksWriteEndpointDown` follows the routing condition of HAProxy itself: it fires when no HAProxy pod sees a pod that a majority of Sentinels names as master and that reports itself as master. That covers every pod down, the Sentinels losing their majority, and a fenced master.
+`KvrocksWriteEndpointDown` follows the routing condition of HAProxy itself: it fires when no HAProxy pod sees a pod that a majority of Sentinels names as master and reaches, and that reports itself as master. That covers every pod down, the Sentinels losing their majority or their link to the master, and a fenced master.
 
 ## Operations
 
@@ -229,11 +229,31 @@ Measured on 2026-11-16 with `make e2e`, on a Kind cluster of 3 workers running i
 | Replica volume lost | 187 268 | 0 | 0.8 s |
 | Master volume lost | 120 284 | 0 | 13.7 s |
 
-When the master's pod is deleted, Kubernetes recreates it within 3 s, before Sentinel declares it down: it comes back as master on the same volume and nothing fails over. When the node dies instead, Sentinel waits 10 s (`sentinel.downAfterMilliseconds`) then promotes a replica.
+When the master's pod is deleted, Kubernetes recreates it within 3 s, on the same volume but with a new address. On Kind, the Sentinels reach it again before they declare it down and nothing fails over. When the node dies instead, Sentinel waits 10 s (`sentinel.downAfterMilliseconds`) then promotes a replica.
+
+Where a vanished pod address drops packets instead of refusing them, as with Cilium, the Sentinels can stay stuck on the old address for longer than that, and fail over even though the pod came back. HAProxy, which resolves the new address at once, used to send writes to the recreated pod meanwhile, and those were lost with the failover: 1 848 acknowledged writes in one run on a real cluster. It now waits for a majority of Sentinels to reach the pod, so either they do in time and nothing fails over, or they fail over to a replica that holds every acknowledged write. See [On a real cluster](#on-a-real-cluster).
 
 The 19 374 writes of the isolated master are the two seconds before it was fenced: HAProxy still reached it, so the connections already open kept writing to it. Without fencing, it would have kept them for the whole partition.
 
 Three more scenarios write 2 000 keys, then kill every node at once and check that all of them are still on every pod: a plain full outage, an outage where the former master that missed a failover restarts first, and one where pod 0 comes back first with an empty volume. None lost a key.
+
+### On a real cluster
+
+Measured on 2026-11-16 with `make e2e-cluster`, on a managed Kubernetes 1.34 cluster of 3 nodes with 1.8 CPU and 6 GB each, Cilium and network block storage, clients over mutual TLS. Only the scenarios that leave the nodes alone run there. The load is the same as on Kind; fewer writes go through because every one of them crosses a real network.
+
+| Scenario | Acknowledged writes | Lost | Longest interruption |
+| --- | ---: | ---: | ---: |
+| Handover run by hand | 55 137 | 0 | 2.1 s |
+| Plain `SENTINEL FAILOVER` | 46 482 | 2 668 | 2.2 s |
+| Rolling update | 171 372 | 0 | 3.8 s |
+| Upgrade that changes the scripts | 191 556 | 0 | 1.8 s |
+| Rolling restart of HAProxy | 160 737 | 0 | 0.2 s |
+| Master pod deleted with `--force` | 53 504 | 0 | 14.0 s |
+| Replica volume lost | 124 943 | 0 | 0.2 s |
+| Master volume lost | 87 328 | 0 | 16.4 s |
+| Handover with the NetworkPolicy on | 55 330 | 0 | 2.1 s |
+
+Two differences with Kind. A new volume takes longer to come than Sentinel takes to fail over, so the master that lost its volume restarts as a replica and the empty-volume guard has nothing to do. And a master pod deleted with `--force` usually ends in a failover, for the reason above: out of four runs, the Sentinels reached the recreated pod in time once (3 s without writes) and failed over three times (about 14 s), without losing a write.
 
 ## Caveats
 
@@ -248,7 +268,7 @@ Three more scenarios write 2 000 keys, then kill every node at once and check th
 - **Not tested behind a service mesh.**
 - **External replicas can be promoted.** Anything that attaches to the master as a replica, a backup job for instance, is seen by Sentinel as a candidate. Start it with `slave-priority 0`.
 - **`connected_slaves` over-counts.** Kvrocks keeps counting a replica whose pod is gone until TCP gives up on it, minutes later. The alerts look at the replicas instead.
-- **Versions.** Everything was tested with Kvrocks 2.17.0, Valkey Sentinel 9.0.6, HAProxy 3.2.25 and Kubernetes 1.37 on Kind, and nothing else. Run `make e2e` again before bumping any of them.
+- **Versions.** Everything was tested with Kvrocks 2.17.0, Valkey Sentinel 9.0.6, HAProxy 3.2.25 and Kubernetes 1.37 on Kind, plus the scenarios that leave the nodes alone on a managed Kubernetes 1.34 with Cilium, and nothing else. Run `make e2e` again before bumping any of them.
 - **Full syncs.** A handover or a rolling update does not make replicas copy the whole database again: the end-to-end scenarios check it. After a crash or a plain `SENTINEL FAILOVER`, a former master that holds writes the new one never got does copy everything again, on purpose (`use-rsid-psync yes`). On a large volume that takes a while.
 
 ## Tests

@@ -85,8 +85,9 @@ spec:
         {{- if include "kvrocks.haproxyEnabled" . }}
         - alert: KvrocksWriteEndpointDown
           # HAProxy's own routing condition: a pod that a majority of Sentinels names as
-          # master, and that reports itself as master. When no HAProxy pod sees one, writes
-          # are refused, whether the Sentinels lost their majority or every pod is down.
+          # master and reaches, and that reports itself as master. When no HAProxy pod sees
+          # one, writes are refused, whether the Sentinels lost their majority or every pod
+          # is down.
           expr: |
             (
               count(

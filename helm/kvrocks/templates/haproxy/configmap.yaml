@@ -50,7 +50,7 @@ data:
       http-request use-service prometheus-exporter if { path /metrics }
       {{- end }}
 
-    # Writes go to the pod that a majority of Sentinels names as master, never to a pod that
+    # Writes go to the pod that a majority of Sentinels names and reaches, never to a pod that
     # merely claims the role: a former master still claims it until it is demoted.
     frontend kvrocks_write
       bind :{{ .Values.port }}
