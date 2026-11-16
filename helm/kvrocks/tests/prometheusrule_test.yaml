@@ -154,9 +154,22 @@ tests:
     set:
       metrics.prometheusRule.enabled: true
     asserts:
-      - equal:
+      - matchRegex:
           path: spec.groups[0].rules[?(@.alert == "KvrocksWriteEndpointDown")].expr
-          value: (max(haproxy_backend_active_servers{namespace="data", service="db-kvrocks-haproxy-metrics", proxy=~"kvrocks_[0-9]+"}) or vector(0)) < 1
+          pattern: 'haproxy_backend_active_servers\{namespace="data", service="db-kvrocks-haproxy-metrics", proxy=~"sentinel_votes_\[0-9\]\+"\}'
+      - matchRegex:
+          path: spec.groups[0].rules[?(@.alert == "KvrocksWriteEndpointDown")].expr
+          pattern: 'haproxy_backend_active_servers\{namespace="data", service="db-kvrocks-haproxy-metrics", proxy=~"kvrocks_\[0-9\]\+"\}'
+
+  - it: requires a majority of Sentinel votes for the write endpoint to count as up
+    set:
+      metrics.prometheusRule.enabled: true
+      replicaCount: 5
+      sentinel.quorum: 2
+    asserts:
+      - matchRegex:
+          path: spec.groups[0].rules[?(@.alert == "KvrocksWriteEndpointDown")].expr
+          pattern: '>= 3\s+and on \(pod, ordinal\)'
 
   - it: follows the release namespace in the series selectors
     release:
@@ -168,9 +181,9 @@ tests:
       - equal:
           path: spec.groups[0].rules[?(@.alert == "KvrocksReplicationBroken")].expr
           value: kvrocks_master_link_up{namespace="storage", service="db-kvrocks-headless"} == 0
-      - equal:
+      - matchRegex:
           path: spec.groups[0].rules[?(@.alert == "KvrocksWriteEndpointDown")].expr
-          value: (max(haproxy_backend_active_servers{namespace="storage", service="db-kvrocks-haproxy-metrics", proxy=~"kvrocks_[0-9]+"}) or vector(0)) < 1
+          pattern: 'namespace="storage", service="db-kvrocks-haproxy-metrics"'
 
   # --- Thresholds ---
 

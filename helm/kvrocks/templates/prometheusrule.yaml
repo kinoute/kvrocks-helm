@@ -84,7 +84,20 @@ spec:
             summary: The volume of {{ `{{ $labels.pod }}` }} is {{ `{{ $value | humanizePercentage }}` }} full
         {{- if include "kvrocks.haproxyEnabled" . }}
         - alert: KvrocksWriteEndpointDown
-          expr: (max(haproxy_backend_active_servers{ {{- $haproxy -}}, proxy=~"kvrocks_[0-9]+"}) or vector(0)) < 1
+          # HAProxy's own routing condition: a pod that a majority of Sentinels names as
+          # master, and that reports itself as master. When no HAProxy pod sees one, writes
+          # are refused, whether the Sentinels lost their majority or every pod is down.
+          expr: |
+            (
+              count(
+                label_replace(haproxy_backend_active_servers{ {{- $haproxy -}}, proxy=~"sentinel_votes_[0-9]+"}, "ordinal", "$1", "proxy", "sentinel_votes_([0-9]+)")
+                  >= {{ include "kvrocks.majority" . }}
+                and on (pod, ordinal)
+                label_replace(haproxy_backend_active_servers{ {{- $haproxy -}}, proxy=~"kvrocks_[0-9]+"}, "ordinal", "$1", "proxy", "kvrocks_([0-9]+)")
+                  >= 1
+              )
+              or vector(0)
+            ) < 1
           for: {{ $rule.forMinutes }}m
           labels:
             severity: critical

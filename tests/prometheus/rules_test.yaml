@@ -27,6 +27,8 @@ tests:
         values: "100x10"
       - series: 'haproxy_backend_active_servers{namespace="kv", service="kv-kvrocks-haproxy-metrics", pod="haproxy-a", proxy="kvrocks_0"}'
         values: "1x10"
+      - series: 'haproxy_backend_active_servers{namespace="kv", service="kv-kvrocks-haproxy-metrics", pod="haproxy-a", proxy="sentinel_votes_0"}'
+        values: "3x10"
     alert_rule_test:
       - eval_time: 10m
         alertname: KvrocksInstanceDown
@@ -159,3 +161,48 @@ tests:
               severity: critical
             exp_annotations:
               summary: No HAProxy of kv-kvrocks can reach a master, writes are refused
+
+  - name: no majority of Sentinels agreeing on a master is critical, even with a pod still master
+    interval: 1m
+    input_series:
+      - series: 'haproxy_backend_active_servers{namespace="kv", service="kv-kvrocks-haproxy-metrics", pod="haproxy-a", proxy="kvrocks_0"}'
+        values: "1x10"
+      - series: 'haproxy_backend_active_servers{namespace="kv", service="kv-kvrocks-haproxy-metrics", pod="haproxy-a", proxy="sentinel_votes_0"}'
+        values: "1x10"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: KvrocksWriteEndpointDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: No HAProxy of kv-kvrocks can reach a master, writes are refused
+
+  - name: the votes and the role must point at the same pod
+    interval: 1m
+    input_series:
+      - series: 'haproxy_backend_active_servers{namespace="kv", service="kv-kvrocks-haproxy-metrics", pod="haproxy-a", proxy="kvrocks_0"}'
+        values: "1x10"
+      - series: 'haproxy_backend_active_servers{namespace="kv", service="kv-kvrocks-haproxy-metrics", pod="haproxy-a", proxy="sentinel_votes_1"}'
+        values: "3x10"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: KvrocksWriteEndpointDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: No HAProxy of kv-kvrocks can reach a master, writes are refused
+
+  - name: one HAProxy pod that still routes is enough
+    interval: 1m
+    input_series:
+      - series: 'haproxy_backend_active_servers{namespace="kv", service="kv-kvrocks-haproxy-metrics", pod="haproxy-a", proxy="kvrocks_0"}'
+        values: "0x10"
+      - series: 'haproxy_backend_active_servers{namespace="kv", service="kv-kvrocks-haproxy-metrics", pod="haproxy-b", proxy="kvrocks_0"}'
+        values: "1x10"
+      - series: 'haproxy_backend_active_servers{namespace="kv", service="kv-kvrocks-haproxy-metrics", pod="haproxy-b", proxy="sentinel_votes_0"}'
+        values: "2x10"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: KvrocksWriteEndpointDown
