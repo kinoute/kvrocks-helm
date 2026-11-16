@@ -182,7 +182,13 @@ describe_cluster() {
     for container in $(k get "$pod" -o jsonpath='{range .status.initContainerStatuses[?(@.restartCount>0)]}{.name} {end}{range .status.containerStatuses[?(@.restartCount>0)]}{.name} {end}' 2>/dev/null); do
       k logs "$pod" -c "$container" --previous --tail=8 2>&1 | sed "s|^|    ${pod#pod/}/$container (previous): |" | cut -c1-200
     done
+    # A container stuck unready says why in its current log, not in the previous one.
+    for container in $(k get "$pod" -o jsonpath='{range .status.initContainerStatuses[?(@.ready==false)]}{.name} {end}{range .status.containerStatuses[?(@.ready==false)]}{.name} {end}' 2>/dev/null); do
+      k logs "$pod" -c "$container" --tail=8 2>&1 | sed "s|^|    ${pod#pod/}/$container (current): |" | cut -c1-200
+    done
   done
+  # Cluster DNS and the pod network, which restarted nodes have to bring back.
+  kubectl -n kube-system get pods -o wide 2>&1 | grep -E 'coredns|kindnet|kube-proxy' | cut -c1-130
   k get events --sort-by=.lastTimestamp 2>&1 | grep -E 'Unhealthy|BackOff|Killing|Failed' | tail -12 | cut -c1-200
   # A handover that gave up leaves its reason in a FailedPreStopHook event.
   k get events --field-selector reason=FailedPreStopHook -o custom-columns=POD:.involvedObject.name,MESSAGE:.message --no-headers 2>&1 | tail -5
@@ -444,6 +450,9 @@ kill_nodes() { # node names
 start_nodes() { # node names
   local node address
   for node in "$@"; do
+    # Reconnecting a running node would drop its routes to the pods of the other nodes, and
+    # with them cluster DNS when CoreDNS runs there.
+    [ "$(docker inspect -f '{{.State.Running}}' "$node")" = true ] && continue
     address=${NODE_ADDRESSES[$node]:-}
     if [ -n "$address" ]; then
       docker network disconnect "$NODE_NETWORK" "$node" >/dev/null 2>&1 || true
