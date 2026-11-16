@@ -220,6 +220,25 @@ Expect three restarts and one handover, without a full sync. Scenario `kvrocks_u
 
 The Sentinel image is part of the same StatefulSet and goes through the same rolling update. HAProxy is a Deployment: its rolling restart loses nothing either (scenario `haproxy_restart`).
 
+### Upgrading Kubernetes
+
+The version itself asks for nothing: the chart needs Kubernetes 1.29 or later and only uses stable APIs. What an upgrade does to the release is drain the nodes, one at a time:
+
+- When the drained node holds the master, its `preStop` hook hands the role over: writes pause for 2 to 4 s, and none is lost.
+- The PodDisruptionBudgets let one Kvrocks pod and one HAProxy pod go at a time: the next drain waits until the evicted pod is back and ready.
+- With one Kvrocks pod per node (`podAntiAffinity: hard`) and no spare node, the evicted pod stays `Pending` until its node comes back. The release runs on the other pods meanwhile, which keep a Sentinel majority. A node pool with a surge of one node, or with autoscaling, avoids that: on the real cluster below, the autoscaler added a node within a minute for the `Pending` pod, and its volume followed it there.
+- Block volumes are zonal: a node that replaces another must be in the same zone, or the pod cannot start on it.
+- Do not drain with `--disable-eviction`: it bypasses the PodDisruptionBudgets. And if the upgrade forces the deletion of a pod after a timeout, the master loses its handover: Sentinel fails over as after a crash, without losing a write but with about 14 s without any.
+
+Scenario `node_upgrade` reproduces it under load: every node in turn is cordoned, drained, kept out, then given back.
+
+| Where | Each node out for | Acknowledged writes | Lost | Longest interruption |
+| --- | ---: | ---: | ---: | ---: |
+| Kind, 3 workers | 30 s | 1 186 378 | 0 | 3.7 s |
+| Real cluster, 3 nodes, autoscaling pool | 2 min | 1 466 888 | 0 | 2.4 s |
+
+No replica copied the whole database again. One earlier Kind run reached 9.2 s without writes, when the master moved twice; the cause of that longer pause is not known yet.
+
 ### Rotating the password
 
 There is no rolling rotation: during a rolling restart, pods with the new password could no longer talk to pods with the old one. The procedure takes a short write outage:
@@ -260,7 +279,7 @@ Three more scenarios write 2 000 keys, then kill every node at once and check th
 
 ### On a real cluster
 
-Measured on 2026-11-16 with `make e2e-cluster`, on a managed Kubernetes 1.34 cluster of 3 nodes with 1.8 CPU and 6 GB each, Cilium and network block storage, clients over mutual TLS. Only the scenarios that leave the nodes alone run there. The load is the same as on Kind; fewer writes go through because every one of them crosses a real network.
+Measured on 2026-11-16 with `make e2e-cluster`, on a managed Kubernetes 1.34 cluster of 3 nodes with 1.8 CPU and 6 GB each, Cilium and network block storage, clients over mutual TLS. Only the scenarios that leave the nodes alone run there, plus `node_upgrade`, which drains them one at a time (see [Upgrading Kubernetes](#upgrading-kubernetes)). The load is the same as on Kind; fewer writes go through because every one of them crosses a real network.
 
 | Scenario | Acknowledged writes | Lost | Longest interruption |
 | --- | ---: | ---: | ---: |
@@ -273,6 +292,7 @@ Measured on 2026-11-16 with `make e2e-cluster`, on a managed Kubernetes 1.34 clu
 | Replica volume lost | 124 943 | 0 | 0.2 s |
 | Master volume lost | 87 328 | 0 | 16.4 s |
 | Handover with the NetworkPolicy on | 55 330 | 0 | 2.1 s |
+| Every node drained in turn | 1 466 888 | 0 | 2.4 s |
 
 Two differences with Kind. A new volume takes longer to come than Sentinel takes to fail over, so the master that lost its volume restarts as a replica and the empty-volume guard has nothing to do. And a master pod deleted with `--force` usually ends in a failover, for the reason above: out of four runs, the Sentinels reached the recreated pod in time once (3 s without writes) and failed over three times (about 14 s), without losing a write.
 
@@ -314,7 +334,7 @@ The scripts that run in the pods have unit tests of their own in [`tests/scripts
 
 The end-to-end scenarios break something while 4 clients write through HAProxy over persistent connections, then read every acknowledged key back from the write endpoint and from each pod. They live in [`tests/e2e/scenarios.sh`](tests/e2e/scenarios.sh).
 
-On a real cluster, `make e2e-cluster` skips every scenario that kills or cuts off a node, drains one or stops cluster DNS. The rest runs in the namespace `kvrocks-ha-test` (`E2E_NAMESPACE`), deleted at the end unless `KEEP_CLUSTER=1`, and the load generator comes from `ghcr.io/kinoute/kvrocks-e2e-loadgen` (`LOADGEN_IMAGE`). `large_dataset`, which only runs when named, writes `E2E_DATASET_GIB` of data shaped like a production workload, then times a full sync and a restart on it. Size the volumes for it with `E2E_VOLUME_SIZE`:
+On a real cluster, `make e2e-cluster` skips every scenario that kills or cuts off a node, drains one or stops cluster DNS. The rest runs in the namespace `kvrocks-ha-test` (`E2E_NAMESPACE`), deleted at the end unless `KEEP_CLUSTER=1`, and the load generator comes from `ghcr.io/kinoute/kvrocks-e2e-loadgen` (`LOADGEN_IMAGE`). `node_upgrade`, which drains every node of the cluster in turn, and `large_dataset` only run when named. `large_dataset` writes `E2E_DATASET_GIB` of data shaped like a production workload, then times a full sync and a restart on it. Size the volumes for it with `E2E_VOLUME_SIZE`:
 
 ```bash
 E2E_CONTEXT=<kube context> E2E_DATASET_GIB=10 E2E_VOLUME_SIZE=40Gi tests/e2e/run.sh install large_dataset
