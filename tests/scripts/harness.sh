@@ -27,9 +27,11 @@ hang() { # $1: host:port
   touch "$WORLD/$1/hang"
 }
 
-reply() { # $1: host:port, $2: command, $3: reply
+reply() { # $1: host:port, $2: command, $3: reply. Replaces a handler of the same command.
   server "$1"
-  printf '%s\n' "$3" >"$WORLD/$1/$(printf '%s' "$2" | tr '[:upper:] ' '[:lower:]_')"
+  file="$WORLD/$1/$(printf '%s' "$2" | tr '[:upper:] ' '[:lower:]_')"
+  rm -f "$file"
+  printf '%s\n' "$3" >"$file"
 }
 
 handler() { # $1: host:port, $2: command; the script comes on stdin and runs on each call

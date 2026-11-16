@@ -155,3 +155,82 @@ hang_failover_request() {
 sleep 3600
 HANDLER
 }
+
+# --to kv-2: kv-2 reports priority 100; setting it makes the local Sentinel read it at once,
+# and a failover then promotes kv-2.
+steered_cluster_ready() {
+  cluster_ready
+  reply kv-2.h:6379 "config get slave-priority" "slave-priority
+100"
+  reply kv-2.h:6379 "config rewrite" "OK"
+  handler kv-2.h:6379 "config set slave-priority" <<'HANDLER'
+printf 'name\nkv-1.h:6379\nip\nkv-1.h\nflags\nslave\nlast-ok-ping-reply\n300\nslave-priority\n100\nname\nkv-2.h:6379\nip\nkv-2.h\nflags\nslave\nlast-ok-ping-reply\n300\nslave-priority\n%s\n' "$4" \
+  >"$WORLD/localhost:26379/sentinel_replicas_kvrocks"
+echo OK
+HANDLER
+  promote_on_failover localhost kv-2.h 2
+}
+
+line_of() { # $1: start of a call. Its first line number among the calls.
+  calls | grep -n -F -- "$1" | head -n 1 | cut -d: -f1
+}
+
+test_to_promotes_the_target_and_restores_its_priority() {
+  steered_cluster_ready
+  switchover --to kv-2
+  assert_eq 0 "$STATUS" "exit status"
+  assert_called "localhost:6379 slaveof kv-2.h 6379"
+  steered=$(line_of "kv-2.h:6379 config set slave-priority 1")
+  paused=$(line_of "localhost:6379 client pause")
+  failover=$(line_of "localhost:26379 sentinel failover kvrocks")
+  restored=$(line_of "kv-2.h:6379 config set slave-priority 100")
+  [ -n "$steered" ] && [ "$steered" -lt "$paused" ] ||
+    fail "Sentinel must know the target before writes are paused"
+  [ -n "$restored" ] && [ "$restored" -gt "$failover" ] ||
+    fail "the priority of the target must come back after the failover"
+  assert_called "kv-2.h:6379 config rewrite"
+}
+
+test_to_a_replica_sentinel_cannot_promote_hands_nothing_over() {
+  steered_cluster_ready
+  sentinel_replicas localhost "kv-1.h slave 300 100" "kv-2.h s_down,slave 300 100"
+  switchover --to kv-2
+  assert_eq 1 "$STATUS" "exit status"
+  assert_not_called "client pause"
+  assert_not_called "config set slave-priority"
+}
+
+test_to_gives_up_before_pausing_when_sentinel_does_not_read_the_priority() {
+  steered_cluster_ready
+  reply kv-2.h:6379 "config set slave-priority" "OK"
+  export PRIORITY_SEEN_TIMEOUT_SECONDS=1
+  switchover --to kv-2
+  assert_eq 1 "$STATUS" "exit status"
+  assert_not_called "localhost:6379 client pause"
+  assert_called "kv-2.h:6379 config set slave-priority 100"
+}
+
+test_to_restores_the_priority_when_the_handover_gives_up() {
+  steered_cluster_ready
+  kvrocks_replica kv-1.h kv-0.h 50
+  switchover --to kv-2
+  assert_eq 1 "$STATUS" "exit status"
+  assert_not_called "sentinel failover"
+  assert_called "localhost:6379 client unpause"
+  assert_called "kv-2.h:6379 config set slave-priority 100"
+}
+
+test_to_the_master_itself_changes_nothing() {
+  steered_cluster_ready
+  switchover --to kv-0
+  assert_eq 0 "$STATUS" "exit status"
+  assert_not_called "client pause"
+  assert_not_called "config set"
+}
+
+test_an_unknown_option_is_refused() {
+  cluster_ready
+  switchover --bogus
+  assert_eq 2 "$STATUS" "exit status"
+  assert_not_called "client pause"
+}
