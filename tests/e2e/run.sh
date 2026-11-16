@@ -35,6 +35,7 @@ ALL_SCENARIOS=(
   empty_first_pod_after_outage
   tls_clients
   network_policy
+  install_from_existing_data
   standalone
   helm_test
 )
