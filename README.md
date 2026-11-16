@@ -106,7 +106,7 @@ For a release named `db`:
 
 ### Main values
 
-Every value is documented in [`helm/kvrocks/values.yaml`](helm/kvrocks/values.yaml), and `values.schema.json` rejects unknown keys. The ones you are most likely to set:
+Every value is listed with its default in the [chart's README](helm/kvrocks/README.md), generated from the comments of [`values.yaml`](helm/kvrocks/values.yaml), and `values.schema.json` rejects unknown keys. The ones you are most likely to set:
 
 | Value | Default | What it does |
 | --- | --- | --- |
@@ -289,7 +289,7 @@ make e2e         # every failure scenario
 make e2e-cluster CONTEXT=<kube context>   # the scenarios that leave the nodes alone, on a real cluster
 ```
 
-`make test` needs `helm` with the `unittest` and `schema` plugins, `shellcheck`, `kubeconform`, `promtool`, `yq`, `uv` and `docker`. The end-to-end targets also need `kind`, `kubectl` and `jq`. On a Linux host, raise the inotify limits first, as in [Kind's known issues](https://kind.sigs.k8s.io/docs/user/known-issues/#pod-errors-due-to-too-many-open-files): the scenarios restart nodes, and each restart takes new instances.
+`make test` needs `helm` with the `unittest` and `schema` plugins, `helm-docs`, `shellcheck`, `kubeconform`, `promtool`, `yq`, `uv` and `docker`. After a change to `values.yaml`, `make schema docs` regenerates the schema and the chart's README, which `make lint` checks. The end-to-end targets also need `kind`, `kubectl` and `jq`. On a Linux host, raise the inotify limits first, as in [Kind's known issues](https://kind.sigs.k8s.io/docs/user/known-issues/#pod-errors-due-to-too-many-open-files): the scenarios restart nodes, and each restart takes new instances.
 
 The scripts that run in the pods have unit tests of their own in [`tests/scripts`](tests/scripts): each runs in the image it runs in production, dash for Kvrocks and busybox for Sentinel, against a fake `redis-cli` that plays a whole cluster, unreachable hosts and DNS outages included.
 
