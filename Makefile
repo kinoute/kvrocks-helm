@@ -17,11 +17,11 @@ KUBECONFORM := kubeconform -strict -summary -schema-location default -schema-loc
 # volume losses only run in the full suite.
 QUICK_SCENARIOS := install switchover rolling_update master_pod_crash helm_test
 
-.PHONY: test lint schema manifests unit scripts rules loadgen e2e e2e-quick e2e-cluster
+.PHONY: test lint schema docs manifests unit scripts rules loadgen e2e e2e-quick e2e-cluster
 
 test: lint manifests unit scripts rules loadgen ## Everything except the end-to-end scenarios
 
-lint: ## Shell scripts, chart, and a values schema in sync with values.yaml
+lint: ## Shell scripts, chart, and a values schema and a chart README in sync with values.yaml
 	shellcheck $(SCRIPTS)
 	helm lint $(CHART) --set auth.password=lint
 	mkdir -p .e2e
@@ -29,10 +29,16 @@ lint: ## Shell scripts, chart, and a values schema in sync with values.yaml
 		-noAdditionalProperties true -indent 2 >/dev/null
 	diff -u $(CHART)/values.schema.json .e2e/values.schema.json || \
 		{ echo "values.schema.json is out of date: run make schema"; exit 1; }
+	helm-docs --chart-search-root $(dir $(CHART)) --dry-run 2>/dev/null >.e2e/README.md
+	diff -u $(CHART)/README.md .e2e/README.md || \
+		{ echo "$(CHART)/README.md is out of date: run make docs"; exit 1; }
 
 schema: ## Regenerates values.schema.json from the annotations in values.yaml
 	cd $(CHART) && helm schema -input values.yaml -output values.schema.json \
 		-noAdditionalProperties true -indent 2
+
+docs: ## Regenerates the chart's README.md from README.md.gotmpl and values.yaml
+	helm-docs --chart-search-root $(dir $(CHART))
 
 manifests: ## Rendered manifests against the Kubernetes and Prometheus Operator schemas
 	$(RENDER) $(ALL_FEATURES) | $(KUBECONFORM)
