@@ -153,9 +153,13 @@ large integer as 2.68e+08; an unquoted YAML yes/no arrives as a boolean.
 {{- end }}
 {{- end }}
 
-{{/* Settings the chart writes itself; letting `config` override them would break the topology. */}}
+{{/*
+Settings the chart writes itself; letting `config` override them would break the topology.
+And rename-command, which would hide from the chart's scripts the commands they rely on: with
+CLIENT renamed, the fencing could no longer pause the writes of an isolated master.
+*/}}
 {{- define "kvrocks.reservedConfigKeys" -}}
-bind port dir pidfile log-dir daemonize cluster-enabled requirepass masterauth slaveof replicaof replica-announce-ip replica-announce-port tls-port tls-cert-file tls-key-file tls-ca-cert-file tls-auth-clients tls-protocols tls-replication
+bind port dir pidfile log-dir daemonize cluster-enabled requirepass masterauth slaveof replicaof replica-announce-ip replica-announce-port tls-port tls-cert-file tls-key-file tls-ca-cert-file tls-auth-clients tls-protocols tls-replication rename-command
 {{- end }}
 
 {{/* Fails the render on values that would produce a broken or unsafe deployment. */}}
@@ -175,6 +179,22 @@ bind port dir pidfile log-dir daemonize cluster-enabled requirepass masterauth s
 {{- end }}
 {{- if eq (int .Values.tls.internalPort) (int .Values.port) }}
 {{- fail "tls.internalPort must differ from port: Kvrocks serves TLS on port and keeps internalPort in clear" }}
+{{- end }}
+{{- end }}
+{{- /*
+Kvrocks reads a key in any case, and a value with a line break adds a line of its own: either
+would slip a reserved setting past the check below. The namespace tokens are credentials, and
+`config` is stored in a ConfigMap, in clear.
+*/}}
+{{- range $key, $value := .Values.config }}
+{{- if hasPrefix "namespace." (lower $key) }}
+{{- fail (printf "config.%s: namespace tokens are credentials, and config is stored in a ConfigMap" $key) }}
+{{- end }}
+{{- if not (regexMatch "^[a-z0-9._-]+$" $key) }}
+{{- fail (printf "config.%s: a key is lowercase letters, digits, dots, dashes and underscores, as kvrocks.conf spells it" $key) }}
+{{- end }}
+{{- if regexMatch "[\\r\\n]" (toString $value) }}
+{{- fail (printf "config.%s must fit on one line: a line break would start a setting of its own" $key) }}
 {{- end }}
 {{- end }}
 {{- range $key := splitList " " (include "kvrocks.reservedConfigKeys" .) }}
