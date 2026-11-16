@@ -1,0 +1,161 @@
+# Unit tests of the alert rules, run by tests/prometheus/run.sh against the rules rendered
+# for release "kv" in namespace "kv" with 3 pods.
+rule_files:
+  - .rendered/rules.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a healthy cluster raises no alert
+    interval: 1m
+    input_series:
+      - series: 'up{namespace="kv", service="kv-kvrocks-headless", pod="kv-kvrocks-0"}'
+        values: "1x10"
+      - series: 'kvrocks_up{namespace="kv", service="kv-kvrocks-headless", pod="kv-kvrocks-0"}'
+        values: "1x10"
+      - series: 'kvrocks_instance_info{namespace="kv", service="kv-kvrocks-headless", pod="kv-kvrocks-0", role="master"}'
+        values: "1x10"
+      - series: 'kvrocks_master_link_up{namespace="kv", service="kv-kvrocks-headless", pod="kv-kvrocks-1"}'
+        values: "1x10"
+      - series: 'kvrocks_master_link_up{namespace="kv", service="kv-kvrocks-headless", pod="kv-kvrocks-2"}'
+        values: "1x10"
+      - series: 'kvrocks_num_background_errors{namespace="kv", service="kv-kvrocks-headless", pod="kv-kvrocks-0"}'
+        values: "0x10"
+      - series: 'kvrocks_used_disk_size{namespace="kv", service="kv-kvrocks-headless", pod="kv-kvrocks-0"}'
+        values: "50x10"
+      - series: 'kvrocks_disk_capacity_bytes{namespace="kv", service="kv-kvrocks-headless", pod="kv-kvrocks-0"}'
+        values: "100x10"
+      - series: 'haproxy_backend_active_servers{namespace="kv", service="kv-kvrocks-haproxy-metrics", pod="haproxy-a", proxy="kvrocks_0"}'
+        values: "1x10"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: KvrocksInstanceDown
+      - eval_time: 10m
+        alertname: KvrocksMasterCountWrong
+      - eval_time: 10m
+        alertname: KvrocksReplicationBroken
+      - eval_time: 10m
+        alertname: KvrocksReplicasMissing
+      - eval_time: 10m
+        alertname: KvrocksBackgroundErrors
+      - eval_time: 10m
+        alertname: KvrocksDiskUsageHigh
+      - eval_time: 10m
+        alertname: KvrocksWriteEndpointDown
+
+  - name: no master at all is critical, even though the count is empty rather than zero
+    interval: 1m
+    input_series:
+      - series: 'kvrocks_instance_info{namespace="kv", service="kv-kvrocks-headless", pod="kv-kvrocks-1", role="slave"}'
+        values: "1x10"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: KvrocksMasterCountWrong
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: kv-kvrocks has 0 masters instead of 1
+
+  - name: two masters are critical
+    interval: 1m
+    input_series:
+      - series: 'kvrocks_instance_info{namespace="kv", service="kv-kvrocks-headless", pod="kv-kvrocks-0", role="master"}'
+        values: "1x10"
+      - series: 'kvrocks_instance_info{namespace="kv", service="kv-kvrocks-headless", pod="kv-kvrocks-1", role="master"}'
+        values: "1x10"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: KvrocksMasterCountWrong
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: kv-kvrocks has 2 masters instead of 1
+
+  - name: a failover that completes within the delay raises nothing
+    interval: 15s
+    input_series:
+      - series: 'kvrocks_instance_info{namespace="kv", service="kv-kvrocks-headless", pod="kv-kvrocks-0", role="master"}'
+        # Prometheus marks a series stale as soon as its target stops exposing it;
+        # a plain gap would keep the last value visible for five more minutes.
+        values: "1x4 stale"
+      - series: 'kvrocks_instance_info{namespace="kv", service="kv-kvrocks-headless", pod="kv-kvrocks-1", role="master"}'
+        values: "_x5 1x40"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: KvrocksMasterCountWrong
+
+  - name: a replica that lost its master is reported, and counted as missing
+    interval: 1m
+    input_series:
+      - series: 'kvrocks_master_link_up{namespace="kv", service="kv-kvrocks-headless", pod="kv-kvrocks-1"}'
+        values: "0x10"
+      - series: 'kvrocks_master_link_up{namespace="kv", service="kv-kvrocks-headless", pod="kv-kvrocks-2"}'
+        values: "1x10"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: KvrocksReplicationBroken
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: kv
+              service: kv-kvrocks-headless
+              pod: kv-kvrocks-1
+            exp_annotations:
+              summary: Kvrocks replica kv-kvrocks-1 lost its master
+      - eval_time: 10m
+        alertname: KvrocksReplicasMissing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: kv-kvrocks has 1 healthy replicas instead of 2
+
+  - name: another release in the same namespace does not trigger the alerts of this one
+    interval: 1m
+    input_series:
+      - series: 'kvrocks_master_link_up{namespace="kv", service="other-kvrocks-headless", pod="other-kvrocks-1"}'
+        values: "0x10"
+      - series: 'kvrocks_master_link_up{namespace="kv", service="kv-kvrocks-headless", pod="kv-kvrocks-1"}'
+        values: "1x10"
+      - series: 'kvrocks_master_link_up{namespace="kv", service="kv-kvrocks-headless", pod="kv-kvrocks-2"}'
+        values: "1x10"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: KvrocksReplicationBroken
+
+  - name: a volume above the threshold is reported
+    interval: 1m
+    input_series:
+      - series: 'kvrocks_used_disk_size{namespace="kv", service="kv-kvrocks-headless", pod="kv-kvrocks-0"}'
+        values: "90x10"
+      - series: 'kvrocks_disk_capacity_bytes{namespace="kv", service="kv-kvrocks-headless", pod="kv-kvrocks-0"}'
+        values: "100x10"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: KvrocksDiskUsageHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: kv
+              service: kv-kvrocks-headless
+              pod: kv-kvrocks-0
+            exp_annotations:
+              summary: The volume of kv-kvrocks-0 is 90% full
+
+  - name: no HAProxy that reaches a master is critical
+    interval: 1m
+    input_series:
+      - series: 'haproxy_backend_active_servers{namespace="kv", service="kv-kvrocks-haproxy-metrics", pod="haproxy-a", proxy="kvrocks_0"}'
+        values: "0x10"
+      - series: 'haproxy_backend_active_servers{namespace="kv", service="kv-kvrocks-haproxy-metrics", pod="haproxy-a", proxy="sentinel_votes_0"}'
+        values: "3x10"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: KvrocksWriteEndpointDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: No HAProxy of kv-kvrocks can reach a master, writes are refused
