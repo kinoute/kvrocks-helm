@@ -13,6 +13,9 @@
 #
 # With --stopping (the preStop hook), writes stay paused when the handover gives up. The
 # pod is about to stop, and the failover that follows then promotes an up-to-date replica.
+#
+# With --to <pod>, Sentinel promotes that replica: before a Kvrocks upgrade, the master moves
+# to the pod the rolling update restarts last. Run it on the master.
 set -eu
 SCRIPT_NAME=kvrocks-switchover
 # shellcheck source=common.sh
@@ -26,11 +29,37 @@ REQUEST_MARGIN_MS=2500
 # Sentinel answers a failover request at once, unless something blocks it for a moment.
 FAILOVER_REQUEST_TIMEOUT_SECONDS=1
 DEMOTE_ATTEMPTS=30
+# Sentinel promotes the up-to-date replica with the lowest priority; the default is 100.
+TARGET_PRIORITY=1
+# Sentinel reads the priority of each replica from its INFO, every ten seconds.
+PRIORITY_SEEN_TIMEOUT_SECONDS=${PRIORITY_SEEN_TIMEOUT_SECONDS:-15}
+USAGE="usage: kvrocks-switchover.sh [--stopping] [--to <pod name>]"
 
 stopping=no
-if [ "${1:-}" = "--stopping" ]; then
-  stopping=yes
-fi
+target=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --stopping) stopping=yes ;;
+    --to)
+      if [ $# -lt 2 ]; then
+        log "$USAGE"
+        exit 2
+      fi
+      target="$2.$KVROCKS_PEERS_DOMAIN"
+      shift
+      ;;
+    *)
+      log "$USAGE"
+      exit 2
+      ;;
+  esac
+  shift
+done
+
+# What the EXIT trap undoes: writes paused before Sentinel accepted the failover, and the
+# priority given to the target.
+writes_held=no
+target_priority=""
 
 now_ms() {
   date +%s%3N
@@ -61,6 +90,40 @@ pick_sentinel() {
   done
   [ -n "$best" ] || return 1
   printf '%s\n' "$best"
+}
+
+# The priority Sentinel last read from a replica.
+sentinel_priority_of() { # $1: Sentinel host, $2: replica host
+  (
+    CLI_TIMEOUT_SECONDS=$PROBE_TIMEOUT_SECONDS
+    sentinel_cli "$1" sentinel replicas "$SENTINEL_MASTER_NAME"
+  ) | tr -d '\r' | paste - - | awk -F '\t' -v replica="$2" '
+    $1 == "ip" { host = $2 }
+    ($1 == "slave-priority" || $1 == "replica-priority") && host == replica { print $2 }'
+}
+
+# Gives the target the lowest priority, and waits until the Sentinel that will run the
+# failover has read it. Done before writes are paused: that can take ten seconds.
+steer_to_target() {
+  local deadline
+  if ! printf '%s\n' "$candidates" | grep -q -x -F "$target"; then
+    log "$target is not a replica Sentinel could promote, no handover"
+    exit 1
+  fi
+  target_priority=$(kv_cli "$target" config get slave-priority | tr -d '\r' | sed -n 2p)
+  if [ -z "$target_priority" ]; then
+    log "cannot read the priority of $target, no handover"
+    exit 1
+  fi
+  kv_cli "$target" config set slave-priority "$TARGET_PRIORITY" >/dev/null
+  deadline=$(($(now_ms) + PRIORITY_SEEN_TIMEOUT_SECONDS * 1000))
+  until [ "$(sentinel_priority_of "$sentinel" "$target")" = "$TARGET_PRIORITY" ]; do
+    if [ "$(now_ms)" -ge "$deadline" ]; then
+      log "Sentinel did not read the new priority of $target in time, no handover"
+      exit 1
+    fi
+    sleep "$POLL_SECONDS"
+  done
 }
 
 # Read on the replica itself: the master's own `lag` field does not drop to 0 at rest,
@@ -103,6 +166,16 @@ resume_writes() {
 release_writes() {
   if [ "$stopping" = no ]; then
     resume_writes
+  fi
+}
+
+cleanup() {
+  if [ "$writes_held" = yes ]; then
+    release_writes
+  fi
+  if [ -n "$target_priority" ]; then
+    kv_cli "$target" config set slave-priority "$target_priority" >/dev/null || true
+    kv_cli "$target" config rewrite >/dev/null || true
   fi
 }
 
@@ -181,9 +254,15 @@ give_up() { # $1: why. The EXIT trap releases the writes, unless the pod is stop
   exit 1
 }
 
+trap cleanup EXIT
+
 case "$(kv_role localhost)" in
   slave)
-    log "not the master, nothing to hand over"
+    named=$(
+      CLI_TIMEOUT_SECONDS=$PROBE_TIMEOUT_SECONDS
+      sentinel_master localhost
+    ) || true
+    log "not the master, nothing to hand over (the Sentinel here names ${named:-no master})"
     exit 0
     ;;
   unknown)
@@ -191,6 +270,11 @@ case "$(kv_role localhost)" in
     exit 1
     ;;
 esac
+
+if [ "$target" = "$(self_fqdn)" ]; then
+  log "already the master"
+  exit 0
+fi
 
 if ! sentinel=$(pick_sentinel); then
   log "no Sentinel names this pod as master, nothing to hand over"
@@ -201,6 +285,9 @@ if [ -z "$candidates" ]; then
   log "Sentinel has no replica it could promote, nothing to hand over to"
   exit 1
 fi
+if [ -n "$target" ]; then
+  steer_to_target
+fi
 
 started=$(now_ms)
 deadline=$((started + SWITCHOVER_PAUSE_MS - REQUEST_MARGIN_MS))
@@ -209,7 +296,7 @@ if ! pause_writes; then
   exit 1
 fi
 # Until Sentinel accepts the failover, giving up is safe: writes simply resume here.
-trap release_writes EXIT
+writes_held=yes
 target_offset=$(kv_info_field localhost master_repl_offset)
 
 if ! wait_until_caught_up "$target_offset" "$candidates" "$deadline"; then
@@ -237,7 +324,7 @@ case "$reply" in
 esac
 
 # Past this point there is no giving up: see wait_for_new_master.
-trap - EXIT
+writes_held=no
 if ! new_master=$(wait_for_new_master); then
   log "Sentinel abandoned the failover, this pod stays master"
   release_writes
@@ -249,4 +336,7 @@ if ! demote_to "$new_master"; then
   exit 1
 fi
 resume_writes
+if [ -n "$target" ] && [ "$new_master" != "$target" ]; then
+  log "Sentinel promoted $new_master, not $target"
+fi
 log "handed the master role over to $new_master at offset $target_offset"
