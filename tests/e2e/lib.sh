@@ -6,15 +6,27 @@ REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 E2E_DIR="$REPO_ROOT/tests/e2e"
 
 CLUSTER_NAME=${CLUSTER_NAME:-kvrocks-e2e}
-# A kubeconfig of its own: these tests can never reach another cluster.
-export KUBECONFIG="$REPO_ROOT/.e2e/kubeconfig"
-
-NAMESPACE=kv
+# E2E_CONTEXT runs the scenarios on an existing cluster instead of Kind: only those that leave
+# the nodes and the rest of the cluster alone, in a namespace of their own (see run.sh).
+E2E_CONTEXT=${E2E_CONTEXT:-}
+USER_KUBECONFIG=${KUBECONFIG:-}
 RELEASE=kv
 FULLNAME="$RELEASE-kvrocks"
 REPLICAS=3
 HAPROXY_REPLICAS=2
-LOADGEN_IMAGE=kvrocks-e2e-loadgen:dev
+# A kubeconfig of its own, with a single cluster in it: these tests can never reach another.
+if [ -n "$E2E_CONTEXT" ]; then
+  export KUBECONFIG="$REPO_ROOT/.e2e/kubeconfig-$E2E_CONTEXT"
+  NAMESPACE=${E2E_NAMESPACE:-kvrocks-ha-test}
+  # Built and pushed by the CI. The tag of a branch moves, hence the pull at every start.
+  LOADGEN_IMAGE=${LOADGEN_IMAGE:-ghcr.io/kinoute/kvrocks-e2e-loadgen:latest}
+  LOADGEN_PULL_POLICY=Always
+else
+  export KUBECONFIG="$REPO_ROOT/.e2e/kubeconfig"
+  NAMESPACE=kv
+  LOADGEN_IMAGE=kvrocks-e2e-loadgen:dev
+  LOADGEN_PULL_POLICY=Never
+fi
 # Part of every key: a run on a kept cluster must not find the keys of an earlier run.
 RUN_ID=$(date +%s)
 
@@ -29,7 +41,12 @@ if [ "$E2E_TLS" = 1 ]; then
   HELM_VALUES+=(--values "$E2E_DIR/values-tls.yaml")
   INTERNAL_PORT=6666
 fi
-CERTS_DIR="$REPO_ROOT/.e2e/certs"
+if [ -n "$E2E_CONTEXT" ]; then
+  HELM_VALUES+=(--values "$E2E_DIR/values-cluster.yaml"
+    --set "persistence.size=${E2E_VOLUME_SIZE:-10Gi}")
+fi
+# The certificates name the services of one namespace.
+CERTS_DIR="$REPO_ROOT/.e2e/certs/$NAMESPACE"
 CLIENT_POD=kv-client
 
 HEALTHY_TIMEOUT_SECONDS=300
@@ -131,10 +148,23 @@ is_healthy() {
 }
 
 wait_healthy() {
-  local deadline=$((SECONDS + HEALTHY_TIMEOUT_SECONDS))
+  wait_healthy_within "$HEALTHY_TIMEOUT_SECONDS"
+}
+
+wait_healthy_within() { # $1: seconds
+  local deadline=$((SECONDS + $1))
   until is_healthy; do
-    [ "$SECONDS" -lt "$deadline" ] || fail "cluster not healthy after ${HEALTHY_TIMEOUT_SECONDS}s"
+    [ "$SECONDS" -lt "$deadline" ] || fail "cluster not healthy after $1s"
     sleep 2
+  done
+}
+
+# What each pod's data takes on its volume.
+print_disk_usage() {
+  local ordinal
+  for ordinal in $(ordinals); do
+    printf '    pod %s: %s MiB on its volume\n' "$ordinal" \
+      "$(k exec "$(pod_name "$ordinal")" -c kvrocks -- du -sm /var/lib/kvrocks | awk '{ print $1 }')"
   done
 }
 
@@ -203,12 +233,17 @@ describe_cluster() {
 # Pods that stand for clients run on the control-plane node, so that taking a worker down
 # never takes them too. Their label lets them through the NetworkPolicy scenario.
 client_pod_spec() {
-  cat <<EOF
+  # On Kind, the clients stay off the workers, which the scenarios kill.
+  if [ -z "$E2E_CONTEXT" ]; then
+    cat <<EOF
   nodeSelector:
     node-role.kubernetes.io/control-plane: ""
   tolerations:
     - key: node-role.kubernetes.io/control-plane
       operator: Exists
+EOF
+  fi
+  cat <<EOF
   volumes:
     - name: client-tls
       secret:
@@ -249,7 +284,7 @@ $(client_pod_spec)
   containers:
     - name: load
       image: $LOADGEN_IMAGE
-      imagePullPolicy: Never
+      imagePullPolicy: $LOADGEN_PULL_POLICY
       args:
         - --host=$FULLNAME
         - --key-prefix=$1-$RUN_ID

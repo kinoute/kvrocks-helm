@@ -24,6 +24,11 @@ SENTINEL_DOWN_AFTER_SECONDS=10
 MAX_DEMOTION_SECONDS=5
 # About one second of writes: the time Sentinel needs between promoting and switching.
 MAX_LOSS_ON_PLAIN_FAILOVER=${MAX_LOSS_ON_PLAIN_FAILOVER:-30000}
+# Size of the data large_dataset writes, and how long it may take per GiB, generously.
+E2E_DATASET_GIB=${E2E_DATASET_GIB:-1}
+DATASET_SECONDS_PER_GIB=900
+# A full sync of the whole dataset, or a restart on it, must be over within this delay.
+LARGE_DATASET_TIMEOUT_SECONDS=${LARGE_DATASET_TIMEOUT_SECONDS:-3600}
 
 scenario_install() {
   local first_install=""
@@ -428,7 +433,7 @@ scenario_network_policy() {
   assert_report network_policy "$report" "$NO_LOSS" "$MAX_PLANNED_WRITE_GAP_SECONDS"
 
   k delete pod intruder --ignore-not-found >/dev/null
-  if k run intruder --image="$LOADGEN_IMAGE" --image-pull-policy=Never --restart=Never \
+  if k run intruder --image="$LOADGEN_IMAGE" --image-pull-policy="$LOADGEN_PULL_POLICY" --restart=Never \
     --attach --quiet --command -- python -c \
     "import socket; socket.create_connection(('$FULLNAME', 6379), timeout=5)" >/dev/null 2>&1; then
     fail "network_policy: a pod that is not an allowed client reached the write endpoint"
@@ -443,7 +448,7 @@ scenario_network_policy() {
 # The migration path from a standalone Kvrocks: its data sits on the volume that pod 0 of a
 # new release claims, and the replicas copy it from there.
 scenario_install_from_existing_data() {
-  local ns=kv-seed seed_release=seed seed_fullname=seed-kvrocks ordinal found
+  local ns="$NAMESPACE-seed" seed_release=seed seed_fullname=seed-kvrocks ordinal found
   kubectl create namespace "$ns" >/dev/null
   kubectl -n "$ns" apply -f - >/dev/null <<EOF
 apiVersion: v1
@@ -518,6 +523,61 @@ scenario_standalone() {
     fail "standalone: the key did not survive the restart"
   printf '    standalone: a key written before the restart is still there\n'
   helm uninstall solo --namespace "$NAMESPACE" >/dev/null
+}
+
+# Fills the cluster with data shaped like a production workload, then measures
+# what its size costs: the disk of each pod, the full sync of a replica that lost its volume,
+# and the restart of a pod on a full volume. Reports numbers, asserts no threshold on them.
+scenario_large_dataset() {
+  local master replica started write_timeout
+  k delete pod dataset --ignore-not-found >/dev/null
+  k apply -f - >/dev/null <<EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: dataset
+  labels:
+    app: loadgen
+spec:
+  restartPolicy: Never
+$(client_pod_spec)
+  containers:
+    - name: dataset
+      image: $LOADGEN_IMAGE
+      imagePullPolicy: $LOADGEN_PULL_POLICY
+      command: ["/app/.venv/bin/python", "/app/dataset.py"]
+      args: ["--host=$FULLNAME", "--gigabytes=$E2E_DATASET_GIB", "--seed=$RUN_ID"]
+      env:
+        - name: KVROCKS_PASSWORD
+          value: "$(password)"
+        - name: KVROCKS_TLS
+          value: "$E2E_TLS"
+$(client_mounts)
+EOF
+  # The size may be a fraction of a GiB: bash has no floating point.
+  write_timeout=$(awk -v gib="$E2E_DATASET_GIB" -v per="$DATASET_SECONDS_PER_GIB" \
+    'BEGIN { print int(gib * per) + 60 }')
+  k wait --for=jsonpath='{.status.phase}'=Succeeded pod/dataset --timeout="${write_timeout}s" \
+    >/dev/null || fail "large_dataset: the dataset was not written: $(k logs dataset --tail=5 2>&1)"
+  printf '    large_dataset: written %s\n' "$(k logs dataset | tail -n 1)"
+  wait_healthy
+  print_disk_usage
+
+  master=$(current_master)
+  replica=$(((master + 1) % REPLICAS))
+  k delete pvc "data-$(pod_name "$replica")" --wait=false >/dev/null
+  k delete pod "$(pod_name "$replica")" --force --grace-period=0 >/dev/null 2>&1
+  started=$SECONDS
+  wait_healthy_within "$LARGE_DATASET_TIMEOUT_SECONDS"
+  printf '    large_dataset: a replica that lost its volume was back in sync after %ss\n' \
+    $((SECONDS - started))
+
+  k delete pod "$(pod_name "$replica")" >/dev/null
+  started=$SECONDS
+  wait_healthy_within "$LARGE_DATASET_TIMEOUT_SECONDS"
+  printf '    large_dataset: a replica restarted on its full volume was back in sync after %ss\n' \
+    $((SECONDS - started))
+  print_disk_usage
 }
 
 # Only the clients the CA vouches for get in, only over TLS, and the port in clear stays

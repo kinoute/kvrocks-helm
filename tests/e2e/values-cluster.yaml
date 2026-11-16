@@ -1,0 +1,14 @@
+# Layered on the other values when the scenarios run on an existing cluster (E2E_CONTEXT).
+# The volume size comes from E2E_VOLUME_SIZE.
+
+# Kvrocks caches up to 4 GB of blocks by default, on top of its write buffers: too much for
+# test nodes of 6 GB that also run the other pods.
+config:
+  rocksdb.block_cache_size: 1024
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    memory: 3Gi

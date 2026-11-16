@@ -3,6 +3,9 @@
 #
 # Usage: tests/e2e/run.sh [scenario ...]    every scenario, in order, by default
 #        KEEP_CLUSTER=1 tests/e2e/run.sh    keeps the cluster afterwards, to look around
+#        E2E_CONTEXT=<context> tests/e2e/run.sh
+#                                           runs on an existing cluster instead, in its own
+#                                           namespace, the scenarios of CLUSTER_SCENARIOS only
 #
 # Needs docker, kind, kubectl, helm and jq.
 set -euo pipefail
@@ -40,8 +43,34 @@ ALL_SCENARIOS=(
   helm_test
 )
 
+# What an existing cluster can take: no scenario that kills a node, cuts the network with
+# iptables on a node, drains a node or stops cluster DNS.
+CLUSTER_SCENARIOS=(
+  install
+  tls_clients
+  switchover
+  plain_sentinel_failover
+  rolling_update
+  upgrade_with_new_scripts
+  haproxy_restart
+  master_pod_crash
+  replica_volume_loss
+  master_volume_loss
+  network_policy
+  install_from_existing_data
+  standalone
+  helm_test
+)
+
 ensure_cluster() {
   mkdir -p "$(dirname "$KUBECONFIG")"
+  if [ -n "$E2E_CONTEXT" ]; then
+    # The credentials of that one context, readable by the user only.
+    (umask 077 && KUBECONFIG=$USER_KUBECONFIG kubectl config view --minify --flatten \
+      --context "$E2E_CONTEXT" >"$KUBECONFIG")
+    kubectl get --raw /version >/dev/null || fail "cannot reach the cluster of $E2E_CONTEXT"
+    return 0
+  fi
   if kind get clusters 2>/dev/null | grep -q -x "$CLUSTER_NAME"; then
     kind export kubeconfig --name "$CLUSTER_NAME" --kubeconfig "$KUBECONFIG" >/dev/null 2>&1
   else
@@ -57,14 +86,41 @@ ensure_cluster() {
 # Only the load generator is built here. The chart's own images are pulled by the nodes,
 # as on a real cluster.
 load_images() {
+  # An existing cluster pulls the load generator from its registry.
+  [ -z "$E2E_CONTEXT" ] || return 0
   # Without provenance: its attestation manifest makes `kind load` fail on a missing digest.
   docker build --quiet --provenance=false --tag "$LOADGEN_IMAGE" "$E2E_DIR/loadgen" >/dev/null
   kind load docker-image "$LOADGEN_IMAGE" --name "$CLUSTER_NAME" >/dev/null 2>&1 ||
     fail "could not load $LOADGEN_IMAGE into the cluster"
 }
 
+# Checked before anything is created, so that a refused run leaves nothing to clean up.
+if [ -n "$E2E_CONTEXT" ]; then
+  scenarios=("${@:-${CLUSTER_SCENARIOS[@]}}")
+  for scenario in "${scenarios[@]}"; do
+    case " ${CLUSTER_SCENARIOS[*]} large_dataset " in
+      *" $scenario "*) ;;
+      *)
+        printf '%s touches the nodes or the whole cluster: Kind only\n' "$scenario" >&2
+        exit 2
+        ;;
+    esac
+  done
+else
+  scenarios=("${@:-${ALL_SCENARIOS[@]}}")
+fi
+
 # Leaves nothing broken behind when a scenario fails halfway.
 cleanup() {
+  if [ -n "$E2E_CONTEXT" ]; then
+    # Everything the scenarios created lives in their namespaces, volumes included.
+    if [ -z "${KEEP_CLUSTER:-}" ]; then
+      kubectl delete namespace "$NAMESPACE" "$NAMESPACE-seed" --ignore-not-found --wait=false \
+        >/dev/null 2>&1 || true
+    fi
+    rm -f "$KUBECONFIG"
+    return 0
+  fi
   heal_partition
   restore_cluster_dns
   if [ -z "${KEEP_CLUSTER:-}" ]; then
@@ -73,8 +129,6 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
-
-scenarios=("${@:-${ALL_SCENARIOS[@]}}")
 
 log "preparing the cluster"
 ensure_cluster
