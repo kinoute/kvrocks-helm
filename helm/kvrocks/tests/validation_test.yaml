@@ -193,6 +193,66 @@ tests:
       - failedTemplate:
           errorMessage: config.replica-announce-port is managed by the chart and cannot be overridden
 
+  - it: refuses rename-command in config, which could hide CLIENT PAUSE from the fencing
+    set:
+      config:
+        rename-command: CLIENT CLIENTX
+    asserts:
+      - failedTemplate:
+          errorMessage: config.rename-command is managed by the chart and cannot be overridden
+
+  # --- Shape of the config entries: nothing may slip a reserved key past the check ---
+
+  - it: refuses a reserved key in capitals, which Kvrocks would read all the same
+    set:
+      config:
+        SLAVEOF: 10.0.0.1 6379
+    asserts:
+      - failedTemplate:
+          errorMessage: "config.SLAVEOF: a key is lowercase letters, digits, dots, dashes and underscores, as kvrocks.conf spells it"
+
+  - it: refuses a key with a space, which would split into a key and a value
+    set:
+      config:
+        "maxclients 10 port": "6380"
+    asserts:
+      - failedTemplate:
+          errorMessage: "config.maxclients 10 port: a key is lowercase letters, digits, dots, dashes and underscores, as kvrocks.conf spells it"
+
+  - it: refuses a value with a line break, which would add a line of its own
+    set:
+      config:
+        maxclients: "100\n    slaveof 10.0.0.1 6379"
+    asserts:
+      - failedTemplate:
+          errorMessage: "config.maxclients must fit on one line: a line break would start a setting of its own"
+
+  - it: refuses a namespace token, a credential the ConfigMap would hold in clear
+    set:
+      config:
+        namespace.ns1: ns1-token
+    asserts:
+      - failedTemplate:
+          errorMessage: "config.namespace.ns1: namespace tokens are credentials, and config is stored in a ConfigMap"
+
+  - it: refuses a namespace token in capitals
+    set:
+      config:
+        NAMESPACE.ns1: ns1-token
+    asserts:
+      - failedTemplate:
+          errorMessage: "config.NAMESPACE.ns1: namespace tokens are credentials, and config is stored in a ConfigMap"
+
+  - it: accepts ordinary settings of every kind
+    set:
+      config:
+        maxclients: 10000
+        rocksdb.max_open_files: 4096
+        slowlog-log-slower-than: 100000
+        rocksdb.enable_blob_files: true
+    asserts:
+      - notFailedTemplate: {}
+
   - it: refuses a quorum that more Sentinels than pods would have to reach
     set:
       sentinel.quorum: 4
