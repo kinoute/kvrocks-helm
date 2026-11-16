@@ -115,3 +115,29 @@ def test_a_replica_still_catching_up_is_waited_for_until_the_timeout(
 
     # Assert
     assert missing == 2
+
+
+def test_no_tls_options_without_kvrocks_tls(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Arrange
+    monkeypatch.delenv("KVROCKS_TLS", raising=False)
+
+    # Act
+    options = loadgen.tls_options(check_hostname=True)
+
+    # Assert
+    assert options == {}
+
+
+def test_tls_options_present_the_mounted_client_certificate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange
+    monkeypatch.setenv("KVROCKS_TLS", "1")
+
+    # Act
+    options = loadgen.tls_options(check_hostname=False)
+
+    # Assert
+    assert options["ssl"] is True
+    assert options["ssl_certfile"] == "/tls/tls.crt"
+    assert options["ssl_check_hostname"] is False

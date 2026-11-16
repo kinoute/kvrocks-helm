@@ -11,6 +11,8 @@ MAX_PLANNED_WRITE_GAP_SECONDS=${MAX_PLANNED_WRITE_GAP_SECONDS:-10}
 # Sentinel waits 10 s before declaring the master down, then promotes a replica.
 MAX_CRASH_WRITE_GAP_SECONDS=${MAX_CRASH_WRITE_GAP_SECONDS:-40}
 OUTAGE_KEYS=2000
+# The port Kvrocks keeps in clear for the traffic inside the release, with TLS.
+INTERNAL_PORT=6666
 EMPTY_POD_HEAD_START_SECONDS=180
 DNS_OUTAGE_SECONDS=60
 # An isolated master must stop taking writes within this delay.
@@ -28,8 +30,12 @@ MAX_LOSS_ON_PLAIN_FAILOVER=${MAX_LOSS_ON_PLAIN_FAILOVER:-30000}
 scenario_install() {
   local first_install=""
   helm status "$RELEASE" --namespace "$NAMESPACE" >/dev/null 2>&1 || first_install=yes
+  kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  if [ "$E2E_TLS" = 1 ]; then
+    create_tls_secrets
+  fi
   helm upgrade --install "$RELEASE" "$REPO_ROOT/helm/kvrocks" --namespace "$NAMESPACE" \
-    --create-namespace --values "$E2E_DIR/values.yaml" >/dev/null
+    "${HELM_VALUES[@]}" >/dev/null
   k rollout status "statefulset/$FULLNAME" --timeout=600s >/dev/null
   wait_healthy
   if [ -n "$first_install" ]; then
@@ -167,7 +173,7 @@ scenario_upgrade_with_new_scripts() {
   printf '# upgrade %s\n' "$RUN_ID" >>"$chart/files/scripts/common.sh"
   failed_hooks_before=$(count_failed_hooks)
   start_load upgrade
-  helm upgrade "$RELEASE" "$chart" --namespace "$NAMESPACE" --values "$E2E_DIR/values.yaml" >/dev/null
+  helm upgrade "$RELEASE" "$chart" --namespace "$NAMESPACE" "${HELM_VALUES[@]}" >/dev/null
   k rollout status "statefulset/$FULLNAME" --timeout=600s >/dev/null ||
     fail "upgrade_with_new_scripts: the rollout did not finish"
   wait_healthy
@@ -180,7 +186,7 @@ scenario_upgrade_with_new_scripts() {
 
   # Back to the chart itself for the scenarios that follow.
   helm upgrade "$RELEASE" "$REPO_ROOT/helm/kvrocks" --namespace "$NAMESPACE" \
-    --values "$E2E_DIR/values.yaml" >/dev/null
+    "${HELM_VALUES[@]}" >/dev/null
   k rollout status "statefulset/$FULLNAME" --timeout=600s >/dev/null
   wait_healthy
 }
@@ -355,7 +361,7 @@ scenario_stale_master_starts_first() {
   old_node=$(node_of "$old_master")
   kill_nodes "$old_node"
   new_master=$(wait_for_new_master "$old_master")
-  write_keys afterfailover "$OUTAGE_KEYS" "$new_master"
+  write_keys afterfailover "$OUTAGE_KEYS"
   # Lets the remaining replica receive them: only replicated data survives an outage.
   sleep "$LOAD_AFTER_FAILURE_SECONDS"
 
@@ -432,7 +438,7 @@ scenario_network_policy() {
   printf '    network_policy: a pod without the client label is shut out\n'
 
   helm upgrade "$RELEASE" "$REPO_ROOT/helm/kvrocks" --namespace "$NAMESPACE" \
-    --values "$E2E_DIR/values.yaml" >/dev/null
+    "${HELM_VALUES[@]}" >/dev/null
   wait_healthy
 }
 
@@ -498,9 +504,10 @@ EOF
 # The single-instance mode: no Sentinel, no HAProxy, data survives a restart of the pod.
 scenario_standalone() {
   local solo=solo-kvrocks cli
-  cli="REDISCLI_AUTH=\$KVROCKS_PASSWORD redis-cli -h $solo -p 6379"
+  # Inside the pod, on the port in clear: the write endpoint is covered by helm_test.
+  cli="REDISCLI_AUTH=\$KVROCKS_PASSWORD redis-cli -h localhost -p \$KVROCKS_PORT"
   helm upgrade --install solo "$REPO_ROOT/helm/kvrocks" --namespace "$NAMESPACE" \
-    --values "$E2E_DIR/values.yaml" --set architecture=standalone >/dev/null
+    "${HELM_VALUES[@]}" --set architecture=standalone >/dev/null
   k rollout status "statefulset/$solo" --timeout=300s >/dev/null ||
     fail "standalone: the pod did not become ready"
   [ "$(k exec "$solo-0" -c kvrocks -- sh -c "$cli set standalone:key kept")" = "OK" ] ||
@@ -513,6 +520,29 @@ scenario_standalone() {
     fail "standalone: the key did not survive the restart"
   printf '    standalone: a key written before the restart is still there\n'
   helm uninstall solo --namespace "$NAMESPACE" >/dev/null
+}
+
+# Only the clients the CA vouches for get in, only over TLS, and the port in clear stays
+# inside the release.
+scenario_tls_clients() {
+  local answer
+  if [ "$E2E_TLS" != 1 ]; then
+    printf '    tls_clients: skipped, the scenarios run without TLS\n'
+    return 0
+  fi
+  ensure_client_pod
+  # Refused clients make the client fail: `|| true` keeps `set -e` from ending the run.
+  answer=$(client_cli "\$CLI ping") || true
+  [ "$answer" = "PONG" ] || fail "tls_clients: a client with a valid certificate was refused: $answer"
+  answer=$(client_cli "valkey-cli -h $FULLNAME -p 6379 --tls --cacert /tls/ca.crt ping 2>&1") || true
+  [ "$answer" != "PONG" ] || fail "tls_clients: a client without a certificate got in"
+  answer=$(client_cli "valkey-cli -h $FULLNAME -p 6379 --tls --cacert /tls/ca.crt --cert /rogue/tls.crt --key /rogue/tls.key ping 2>&1") || true
+  [ "$answer" != "PONG" ] || fail "tls_clients: a client certificate from another CA got in"
+  answer=$(client_cli "timeout 5 valkey-cli -h $FULLNAME -p 6379 ping 2>&1") || true
+  [ "$answer" != "PONG" ] || fail "tls_clients: a client in clear got in"
+  answer=$(client_cli "timeout 5 valkey-cli -h $(pod_fqdn 0) -p $INTERNAL_PORT ping 2>&1") || true
+  [ "$answer" != "PONG" ] || fail "tls_clients: the port in clear answers outside the release"
+  printf '    tls_clients: only clients with a certificate from the CA, over TLS, get in\n'
 }
 
 scenario_helm_test() {

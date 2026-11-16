@@ -18,6 +18,16 @@ LOADGEN_IMAGE=kvrocks-e2e-loadgen:dev
 # Part of every key: a run on a kept cluster must not find the keys of an earlier run.
 RUN_ID=$(date +%s)
 
+# The scenarios run with TLS in front of Kvrocks and client certificates required, as in
+# production, unless E2E_TLS=0.
+E2E_TLS=${E2E_TLS:-1}
+HELM_VALUES=(--values "$E2E_DIR/values.yaml")
+if [ "$E2E_TLS" = 1 ]; then
+  HELM_VALUES+=(--values "$E2E_DIR/values-tls.yaml")
+fi
+CERTS_DIR="$REPO_ROOT/.e2e/certs"
+CLIENT_POD=kv-client
+
 HEALTHY_TIMEOUT_SECONDS=300
 NEW_MASTER_TIMEOUT_SECONDS=90
 # How long the load keeps running after a failure, to prove writes resumed.
@@ -180,17 +190,106 @@ describe_cluster() {
   done
 }
 
-# The load runs on the control-plane node, so that taking a worker down never takes it too.
+# Pods that stand for clients run on the control-plane node, so that taking a worker down
+# never takes them too. Their label lets them through the NetworkPolicy scenario.
+client_pod_spec() {
+  cat <<EOF
+  nodeSelector:
+    node-role.kubernetes.io/control-plane: ""
+  tolerations:
+    - key: node-role.kubernetes.io/control-plane
+      operator: Exists
+  volumes:
+    - name: client-tls
+      secret:
+        secretName: kv-client-tls
+        optional: true
+    - name: rogue-tls
+      secret:
+        secretName: kv-rogue-client-tls
+        optional: true
+EOF
+}
+
+client_mounts() {
+  cat <<EOF
+      volumeMounts:
+        - name: client-tls
+          mountPath: /tls
+          readOnly: true
+        - name: rogue-tls
+          mountPath: /rogue
+          readOnly: true
+EOF
+}
+
 start_load() { # $1: name of the load, also its key prefix
-  local overrides='{"spec":{"nodeSelector":{"node-role.kubernetes.io/control-plane":""},"tolerations":[{"key":"node-role.kubernetes.io/control-plane","operator":"Exists"}]}}'
   # A finished load of an earlier run keeps its name.
   k delete pod "load-$1" --ignore-not-found >/dev/null
-  k run "load-$1" --image="$LOADGEN_IMAGE" --image-pull-policy=Never --restart=Never \
-    --labels=app=loadgen --env="KVROCKS_PASSWORD=$(password)" --overrides="$overrides" -- \
-    --host "$FULLNAME" --key-prefix "$1-$RUN_ID" --settle-seconds "$LOAD_SETTLE_SECONDS" \
-    --pod-host "$(pod_fqdn 0)" --pod-host "$(pod_fqdn 1)" --pod-host "$(pod_fqdn 2)" >/dev/null
+  k apply -f - >/dev/null <<EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: load-$1
+  labels:
+    app: loadgen
+spec:
+  restartPolicy: Never
+$(client_pod_spec)
+  containers:
+    - name: load
+      image: $LOADGEN_IMAGE
+      imagePullPolicy: Never
+      args:
+        - --host=$FULLNAME
+        - --key-prefix=$1-$RUN_ID
+        - --settle-seconds=$LOAD_SETTLE_SECONDS
+        - --pod-host=$(pod_fqdn 0)
+        - --pod-host=$(pod_fqdn 1)
+        - --pod-host=$(pod_fqdn 2)
+      env:
+        - name: KVROCKS_PASSWORD
+          value: "$(password)"
+        - name: KVROCKS_TLS
+          value: "$E2E_TLS"
+$(client_mounts)
+EOF
   k wait --for=condition=Ready "pod/load-$1" --timeout=120s >/dev/null
   sleep "$LOAD_WARMUP_SECONDS"
+}
+
+# A long-lived client next to the cluster: valkey-cli with the test client certificate.
+ensure_client_pod() {
+  k get pod "$CLIENT_POD" >/dev/null 2>&1 && return 0
+  k apply -f - >/dev/null <<EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: $CLIENT_POD
+  labels:
+    app: loadgen
+spec:
+$(client_pod_spec)
+  containers:
+    - name: cli
+      image: $(sentinel_image)
+      command: ["sleep", "infinity"]
+      env:
+        - name: REDISCLI_AUTH
+          value: "$(password)"
+$(client_mounts)
+EOF
+  k wait --for=condition=Ready "pod/$CLIENT_POD" --timeout=120s >/dev/null
+}
+
+# valkey-cli against the write endpoint, as an application would connect.
+client_cli() { # $1: a shell snippet that may use $CLI, the client command line
+  local tls_args=""
+  if [ "$E2E_TLS" = 1 ]; then
+    tls_args="--tls --cacert /tls/ca.crt --cert /tls/tls.crt --key /tls/tls.key"
+  fi
+  ensure_client_pod
+  k exec "$CLIENT_POD" -- sh -c "CLI='valkey-cli -h $FULLNAME -p 6379 $tls_args'; $1" 2>/dev/null
 }
 
 # Stops the load and prints its JSON report, once it has read every acknowledged key back.
@@ -223,21 +322,27 @@ assert_report() { # $1: scenario, $2: JSON report, $3: max lost writes, $4: max 
     fail "$1: writes were interrupted for ${gap}s (allowed: ${4}s)"
 }
 
-# Writes keys <prefix>:1..<count> through the write endpoint, from a pod that is up.
+# Writes keys <prefix>:1..<count> through the write endpoint, as a client would.
 # Waits for the endpoint to take writes first, and fails unless every write was acknowledged.
-write_keys() { # $1: prefix, $2: count, $3: ordinal of the pod to run from (default 0)
-  local from=${3:-0} deadline=$((SECONDS + HEALTHY_TIMEOUT_SECONDS)) acked
-  until [ "$(kv_exec "$from" sentinel "redis-cli -h $FULLNAME -p \$KVROCKS_PORT set $1:probe 1")" = "OK" ]; do
+write_keys() { # $1: prefix, $2: count
+  local deadline=$((SECONDS + HEALTHY_TIMEOUT_SECONDS)) acked
+  until [ "$(client_cli "\$CLI set $1:probe 1")" = "OK" ]; do
     [ "$SECONDS" -lt "$deadline" ] || fail "the write endpoint never took a write"
     sleep 1
   done
-  acked=$(kv_exec "$from" sentinel "seq 1 $2 | sed 's/.*/SET $1-$RUN_ID:& &/' | redis-cli -h $FULLNAME -p \$KVROCKS_PORT | grep -c '^OK$'")
+  acked=$(client_cli "seq 1 $2 | sed 's/.*/SET $1-$RUN_ID:& &/' | \$CLI | grep -c '^OK$'")
   [ "$acked" = "$2" ] || fail "only $acked of the $2 writes of $1 were acknowledged"
 }
 
-# Counts how many of the keys <prefix>:1..<count> a host holds.
+# Counts how many of the keys <prefix>:1..<count> a host holds: the write endpoint through
+# the client pod, a Kvrocks pod on its port in clear, from inside the release.
 count_keys() { # $1: host, $2: prefix, $3: count
-  kv_exec 0 sentinel "seq 1 $3 | sed 's/.*/EXISTS $2-$RUN_ID:&/' | redis-cli -h $1 -p \$KVROCKS_PORT | grep -c '^1'"
+  local query="seq 1 $3 | sed 's/.*/EXISTS $2-$RUN_ID:&/'"
+  if [ "$1" = "$FULLNAME" ]; then
+    client_cli "$query | \$CLI | grep -c '^1'"
+  else
+    kv_exec 0 sentinel "$query | redis-cli -h $1 -p \$KVROCKS_PORT | grep -c '^1'"
+  fi
 }
 
 assert_keys_everywhere() { # $1: scenario, $2: prefix, $3: count
@@ -406,4 +511,61 @@ restore_cluster_dns() {
 kvrocks_image() {
   helm template "$RELEASE" "$REPO_ROOT/helm/kvrocks" --values "$E2E_DIR/values.yaml" |
     awk '$1 == "image:" && $2 ~ /\/apache\/kvrocks:/ { print $2; exit }'
+}
+
+# The Sentinel image the chart deploys, which carries valkey-cli.
+sentinel_image() {
+  helm template "$RELEASE" "$REPO_ROOT/helm/kvrocks" --values "$E2E_DIR/values.yaml" |
+    awk '$1 == "image:" && $2 ~ /\/valkey\/valkey:/ { print $2; exit }'
+}
+
+# Test certificates with the profile of the production ones: a server certificate for the
+# names clients use (not the pods'), usable as server only; a client certificate; and a
+# client certificate from another CA, which must be refused.
+# The extensions are those of a real PKI: Python 3.13 and later verify strictly by default,
+# and refuse a certificate without an Authority Key Identifier or a CA without key usage.
+make_test_certificates() {
+  local san
+  mkdir -p "$CERTS_DIR"
+  [ -f "$CERTS_DIR/server.crt" ] && return 0
+  (
+    cd "$CERTS_DIR" || exit 1
+    issue() { # $1: name, $2: CA, $3: extensions
+      openssl req -newkey rsa:2048 -nodes -keyout "$1.key" -out "$1.csr" -subj "/CN=$1" 2>/dev/null
+      printf '%s\n' "basicConstraints=critical,CA:FALSE" \
+        "keyUsage=critical,digitalSignature,keyEncipherment" \
+        "subjectKeyIdentifier=hash" "authorityKeyIdentifier=keyid,issuer" "$3" >"$1.ext"
+      openssl x509 -req -in "$1.csr" -CA "$2.crt" -CAkey "$2.key" -CAcreateserial -out "$1.crt" \
+        -days 30 -extfile "$1.ext" 2>/dev/null
+    }
+    for ca in ca rogue-ca; do
+      openssl req -x509 -newkey rsa:2048 -nodes -keyout "$ca.key" -out "$ca.crt" -days 30 \
+        -subj "/CN=$ca" -addext "basicConstraints=critical,CA:TRUE" \
+        -addext "keyUsage=critical,keyCertSign,cRLSign" \
+        -addext "subjectKeyIdentifier=hash" 2>/dev/null
+    done
+    san="DNS:localhost"
+    for service in "$FULLNAME" "$FULLNAME-read" solo-kvrocks; do
+      san="$san,DNS:$service,DNS:$service.$NAMESPACE,DNS:$service.$NAMESPACE.svc,DNS:$service.$NAMESPACE.svc.cluster.local"
+    done
+    issue server ca "subjectAltName=$san
+extendedKeyUsage=serverAuth"
+    issue client ca "extendedKeyUsage=clientAuth"
+    issue rogue-client rogue-ca "extendedKeyUsage=clientAuth"
+  )
+}
+
+create_tls_secrets() {
+  make_test_certificates
+  k create secret tls kv-kvrocks-tls --cert="$CERTS_DIR/server.crt" --key="$CERTS_DIR/server.key" \
+    --dry-run=client -o yaml | k apply -f - >/dev/null
+  k create secret generic kv-kvrocks-ca --from-file=ca.crt="$CERTS_DIR/ca.crt" \
+    --dry-run=client -o yaml | k apply -f - >/dev/null
+  # The client Secrets also carry the CA, to verify the server.
+  k create secret generic kv-client-tls --from-file=tls.crt="$CERTS_DIR/client.crt" \
+    --from-file=tls.key="$CERTS_DIR/client.key" --from-file=ca.crt="$CERTS_DIR/ca.crt" \
+    --dry-run=client -o yaml | k apply -f - >/dev/null
+  k create secret generic kv-rogue-client-tls --from-file=tls.crt="$CERTS_DIR/rogue-client.crt" \
+    --from-file=tls.key="$CERTS_DIR/rogue-client.key" --from-file=ca.crt="$CERTS_DIR/ca.crt" \
+    --dry-run=client -o yaml | k apply -f - >/dev/null
 }

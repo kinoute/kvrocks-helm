@@ -33,6 +33,7 @@ ALL_SCENARIOS=(
   full_outage
   stale_master_starts_first
   empty_first_pod_after_outage
+  tls_clients
   network_policy
   standalone
   helm_test

@@ -1,0 +1,8 @@
+# Layered on values.yaml when the scenarios run with TLS (E2E_TLS=1, the default).
+# The Secrets are created by the harness from a test CA (see make_test_certificates).
+tls:
+  enabled: true
+  existingSecret: kv-kvrocks-tls
+  ca:
+    secret: kv-kvrocks-ca
+  clientSecret: kv-client-tls

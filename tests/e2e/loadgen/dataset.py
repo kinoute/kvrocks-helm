@@ -9,6 +9,7 @@ The keys fall into four families, in the proportions and sizes of a real instanc
 - the rest are short-lived strings and a handful of large lists kept for a day.
 
 Values are random, so that RocksDB cannot compress them away. Prints a JSON report.
+With `KVROCKS_TLS=1`, it connects like the load generator, with the certificates on /tls.
 """
 
 from __future__ import annotations
@@ -25,6 +26,8 @@ from dataclasses import dataclass
 import redis
 from redis.backoff import NoBackoff
 from redis.retry import Retry
+
+from loadgen import tls_options
 
 BYTES_PER_GIB = 1024**3
 PIPELINE_SIZE = 500
@@ -183,6 +186,7 @@ def main() -> None:
         password=os.environ.get("KVROCKS_PASSWORD") or None,
         socket_timeout=30,
         retry=Retry(NoBackoff(), 0),
+        **tls_options(check_hostname=True),  # type: ignore[arg-type]
     )
     target = int(args.gigabytes * BYTES_PER_GIB)
     written = 0

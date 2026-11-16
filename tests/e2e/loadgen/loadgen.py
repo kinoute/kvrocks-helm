@@ -27,6 +27,7 @@ SOCKET_TIMEOUT_SECONDS = 2.0
 PAUSE_AFTER_ERROR_SECONDS = 0.05
 VERIFY_BATCH_SIZE = 500
 VERIFY_RETRY_SECONDS = 2.0
+TLS_DIR = "/tls"
 
 
 class KeyReader(Protocol):
@@ -46,7 +47,25 @@ class WorkerLog:
     errors: dict[str, int] = field(default_factory=dict)
 
 
-def connect(host: str, port: int, password: str | None) -> redis.Redis:
+def tls_options(check_hostname: bool) -> dict[str, object]:
+    """TLS settings of a client, from KVROCKS_TLS and the certificates mounted on /tls.
+
+    Applications check the name of the write endpoint against the server certificate, so the
+    load does too. The certificate does not cover the pods: reading them back skips that check.
+    """
+    if os.environ.get("KVROCKS_TLS") != "1":
+        return {}
+    return {
+        "ssl": True,
+        "ssl_ca_certs": f"{TLS_DIR}/ca.crt",
+        "ssl_certfile": f"{TLS_DIR}/tls.crt",
+        "ssl_keyfile": f"{TLS_DIR}/tls.key",
+        "ssl_cert_reqs": "required",
+        "ssl_check_hostname": check_hostname,
+    }
+
+
+def connect(host: str, port: int, password: str | None, check_hostname: bool = True) -> redis.Redis:
     """Opens a client with short timeouts, so an outage shows up as errors.
 
     redis-py retries a failed command three times by default. Retries are turned off: every
@@ -60,6 +79,7 @@ def connect(host: str, port: int, password: str | None) -> redis.Redis:
         socket_connect_timeout=SOCKET_TIMEOUT_SECONDS,
         retry=Retry(NoBackoff(), 0),
         decode_responses=True,
+        **tls_options(check_hostname),  # type: ignore[arg-type]
     )
 
 
@@ -194,7 +214,7 @@ def main() -> None:
     )
     missing_by_pod = {
         host: count_missing_when_reachable(
-            connect(host, args.port, password),
+            connect(host, args.port, password, check_hostname=False),
             acked_keys,
             args.verify_timeout_seconds,
             expected_missing=lost or 0,

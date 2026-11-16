@@ -6,6 +6,8 @@ LOADGEN := tests/e2e/loadgen
 # Every optional resource switched on, so that the schemas of all of them are checked.
 ALL_FEATURES := --set metrics.serviceMonitor.enabled=true --set metrics.prometheusRule.enabled=true \
 	--set networkPolicy.enabled=true
+TLS := --set tls.enabled=true --set tls.existingSecret=kv-tls --set tls.ca.secret=kv-ca \
+	--set tls.clientSecret=kv-client-tls --set tls.reloader=true
 RENDER := helm template kv $(CHART) --set auth.password=lint
 # The second location resolves the Prometheus Operator CRDs.
 KUBECONFORM := kubeconform -strict -summary -schema-location default -schema-location \
@@ -35,6 +37,7 @@ schema: ## Regenerates values.schema.json from the annotations in values.yaml
 manifests: ## Rendered manifests against the Kubernetes and Prometheus Operator schemas
 	$(RENDER) $(ALL_FEATURES) | $(KUBECONFORM)
 	$(RENDER) --set architecture=standalone | $(KUBECONFORM)
+	$(RENDER) $(ALL_FEATURES) $(TLS) | $(KUBECONFORM)
 
 unit: ## helm-unittest suites
 	helm unittest $(CHART)
@@ -53,5 +56,5 @@ loadgen: ## Lint, types and tests of the load generator used by the end-to-end s
 e2e: ## Every failure scenario on a local Kind cluster (needs docker, kind, kubectl, jq)
 	tests/e2e/run.sh
 
-e2e-quick: ## The handover, rolling update and master crash scenarios only
-	tests/e2e/run.sh $(QUICK_SCENARIOS)
+e2e-quick: ## The handover, rolling update and master crash scenarios only, without TLS
+	E2E_TLS=0 tests/e2e/run.sh $(QUICK_SCENARIOS)
