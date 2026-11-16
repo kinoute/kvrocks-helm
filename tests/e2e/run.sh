@@ -24,6 +24,7 @@ ALL_SCENARIOS=(
   plain_sentinel_failover
   rolling_update
   upgrade_with_new_scripts
+  kvrocks_upgrade
   drain
   haproxy_restart
   master_pod_crash
@@ -52,6 +53,7 @@ CLUSTER_SCENARIOS=(
   plain_sentinel_failover
   rolling_update
   upgrade_with_new_scripts
+  kvrocks_upgrade
   haproxy_restart
   master_pod_crash
   replica_volume_loss
