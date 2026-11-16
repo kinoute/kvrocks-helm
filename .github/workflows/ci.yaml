@@ -47,6 +47,11 @@ jobs:
       - uses: azure/setup-helm@v5
         with:
           version: ${{ env.HELM_VERSION }}
+      # Every Kind node restarted by the scenarios takes new inotify instances, and the
+      # runner's default limit ran out halfway: kube-proxy then failed with "too many open
+      # files" and took cluster DNS away from the pods of its node. Values from Kind's
+      # known issues.
+      - run: sudo sysctl -w fs.inotify.max_user_instances=512 fs.inotify.max_user_watches=524288
       # docker, kind, kubectl and jq ship with the runner image.
       # A pull request gets the quick scenarios; main and release tags get all of them.
       - run: make ${{ github.event_name == 'pull_request' && 'e2e-quick' || 'e2e' }}
