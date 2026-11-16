@@ -34,7 +34,7 @@ flowchart LR
 
 - A StatefulSet of 3 pods. Each pod runs Kvrocks and `kvrocks_exporter`, with two sidecars: a Sentinel (the Valkey image) and a small fencing loop.
 - HAProxy is the write endpoint. It sends writes to the pod that a majority of Sentinels names as master, and only if that pod also reports itself as master. With no majority it refuses connections rather than guess.
-- The fencing loop pauses the writes of a master that a majority of Sentinels no longer confirms, as when it is cut off from the other pods. Kvrocks has no `min-replicas-to-write`, and without this the connections already open to such a master would keep writing to it until the partition heals. Those writes are lost when it rejoins as a replica.
+- The fencing loop pauses the writes of a master that a majority of Sentinels no longer confirms, as when it is cut off from the other pods. Kvrocks has no `min-replicas-to-write`, and without this the connections already open to such a master would keep writing to it until the partition heals. Those writes are lost when it rejoins as a replica. It reaches the other Sentinels by their last known address, so that a cluster DNS outage does not make it pause a healthy master.
 - Everything goes by pod hostnames, never by IP: pod IPs change on every restart.
 - `sentinel.conf` and a writable copy of `kvrocks.conf` live on the data volume. The role of a pod never comes from a ConfigMap, because Sentinel rewrites it at every failover.
 - Sentinel and the fencing loop are native sidecars, hence Kubernetes 1.29 or later: Kubernetes only stops them once Kvrocks has exited, so they are still there while the master hands its role over.
@@ -51,9 +51,9 @@ When a master has to stop (rolling update, drain), its `preStop` hook hands the 
 2. It checks that every replica Sentinel could promote has received every write. Sentinel ranks replicas with offsets it read up to ten seconds earlier, so it may pick any of them.
 3. It asks Sentinel to fail over, keeps writes paused until the new master is announced, then demotes itself.
 
-If a replica is behind, the handover gives up and writes stay paused until the pod stops. The failover that follows is then slower, about 13 s instead of 3 s, but it promotes an up-to-date replica.
+If a replica is behind, the handover gives up and writes stay paused until the pod stops. The failover that follows is then slower, about 15 s instead of 3 s, but it promotes an up-to-date replica and loses nothing (scenario `handover_aborted_on_stop`).
 
-A replica only becomes ready once a majority of Sentinels could promote it. After a restart, Sentinel needs a DNS answer with the new address of the pod before it can reach it again, which took about 15 s on Kind. Without that condition, a rolling update would stop the master while no Sentinel could promote the replica that had just restarted.
+A replica only becomes ready once a majority of Sentinels could promote it. After a restart, Sentinel needs a DNS answer with the new address of the pod before it can reach it again, which took about 15 s in one Kind run where I timed it. Without that condition, a rolling update would stop the master while no Sentinel could promote the replica that had just restarted. When fewer than a majority of Sentinels answer at all, as during a DNS outage, every one that answers must be able to promote it.
 
 ## Installation
 
@@ -85,7 +85,12 @@ As of 2026-11-16 the chart is not published to a registry yet, so it installs fr
 
 **Important:** pick `replicaCount` and the password before you install. Changing either afterwards is not handled by the chart, see [Caveats](#caveats).
 
-Requirements: Kubernetes 1.29 or later, and Kvrocks 2.16.0 or later in `replication` mode, the first version with `CLIENT PAUSE WRITE`. The chart refuses an older `image.tag` it can read, and the handover script refuses to run on an older Kvrocks pinned by digest.
+Requirements:
+
+- Kubernetes 1.29 or later.
+- As many schedulable nodes as `replicaCount`: by default each Kvrocks pod needs a node of its own (`podAntiAffinity: hard`).
+- Kvrocks 2.16.0 or later in `replication` mode, the first version with `CLIENT PAUSE WRITE`. The chart refuses an older `image.tag` it can read, and the handover script refuses to run on an older Kvrocks pinned by digest.
+- A password without whitespace, quotes or backslashes: HAProxy sends it in its health checks.
 
 ## Usage
 
@@ -107,7 +112,8 @@ Every value is documented in [`helm/kvrocks/values.yaml`](helm/kvrocks/values.ya
 | --- | --- | --- |
 | `architecture` | `replication` | `standalone` runs a single Kvrocks, without Sentinel or HAProxy |
 | `auth.existingSecret` | | Secret that holds the password, under the key `auth.secretKey` |
-| `persistence.size` | `10Gi` | Size of each pod's volume. A StatefulSet cannot change it afterwards |
+| `persistence.size` | `10Gi` | Size of each pod's volume, see [Sizing](#sizing). A StatefulSet cannot change it afterwards |
+| `podAntiAffinity` | `hard` | `soft` lets two Kvrocks pods share a node, for clusters with fewer nodes than pods |
 | `config` | `use-rsid-psync: "yes"` | Extra `kvrocks.conf` settings |
 | `sentinel.downAfterMilliseconds` | `10000` | How long a master must be unreachable before Sentinel fails over |
 | `fencing.enabled` | `true` | Pauses the writes of a master that a majority of Sentinels no longer confirms |
@@ -129,11 +135,56 @@ The output of the handovers run by the `preStop` hook is not in the container lo
 kubectl exec <pod> -c kvrocks -- cat /var/lib/kvrocks/handover.log
 ```
 
-Do not use a plain `SENTINEL FAILOVER` for that. Sentinel promotes a replica while the old master still accepts writes for about a second, and those writes are thrown away. In the end-to-end runs it lost between 4 500 and 8 500 acknowledged writes each time. The script loses none.
+Do not use a plain `SENTINEL FAILOVER` for that. Sentinel promotes a replica while the old master still accepts writes for about a second, and those writes are thrown away: between 4 500 and 8 500 acknowledged writes in each of a dozen end-to-end runs. The script loses none.
 
 ### Alerts
 
 `KvrocksInstanceDown`, `KvrocksMasterCountWrong`, `KvrocksReplicationBroken`, `KvrocksReplicasMissing`, `KvrocksBackgroundErrors`, `KvrocksDiskUsageHigh` and `KvrocksWriteEndpointDown`. They are unit-tested with `promtool` in `tests/prometheus`.
+
+`KvrocksWriteEndpointDown` follows the routing condition of HAProxy itself: it fires when no HAProxy pod sees a pod that a majority of Sentinels names as master and that reports itself as master. That covers every pod down, the Sentinels losing their majority, and a fenced master.
+
+## Operations
+
+### Sizing
+
+Each pod holds a full copy of the data. Give its volume at least twice the size of the data, plus the RocksDB write-ahead log:
+
+- a full sync downloads a complete checkpoint before it replaces the old database, so a replica needs room for both copies at once ([`storage.cc`](https://github.com/apache/kvrocks/blob/v2.17.0/src/storage/storage.cc));
+- the master keeps its write-ahead log for replicas that fall behind, up to `rocksdb.wal_size_limit_mb` (16 GB by default) or `rocksdb.wal_ttl_seconds` (3 h).
+
+A full sync happens when a pod is new or lost its volume, and when a former master comes back with writes the new master never got. Its duration grows with the data. Nothing in this repository has been measured above a few gigabytes yet.
+
+Set `resources` too: with none, the pods run as BestEffort and are the first evicted under memory pressure.
+
+### Migrating from a standalone Kvrocks
+
+The chart starts pod 0 as master when it finds data on its volume and no other pod holds any. Moving a standalone Kvrocks therefore comes down to putting its data on that volume before the first install (scenario `install_from_existing_data`):
+
+1. Stop the writes to the standalone instance, or accept losing those made after the copy.
+2. Copy its data directory, the one that contains `db/`, to a volume claim named `data-<release>-kvrocks-0` in the target namespace. A clone from a `VolumeSnapshot` of the old volume is the fastest way when the storage class supports it.
+3. Install the chart with that release name. Pod 0 starts as master on the copied data, and the other pods copy it with a full sync.
+4. Point the clients at the write endpoint.
+
+The configuration and the password of the old instance are not reused: the chart writes its own `kvrocks.conf` next to the data.
+
+### Backup and restore
+
+The chart does not take backups. Two ways that fit it:
+
+- A `VolumeSnapshot` of a replica's volume. RocksDB recovers from its write-ahead log, so a snapshot of a running replica is consistent.
+- A job that attaches to the write endpoint's master as an extra replica, waits for the sync, and copies the files. Start it with `slave-priority 0`, or Sentinel may promote it.
+
+To restore, follow the migration above with the backup as the data.
+
+### Rotating the password
+
+There is no rolling rotation: during a rolling restart, pods with the new password could no longer talk to pods with the old one. The procedure takes a short write outage:
+
+1. Update the Secret.
+2. Delete every Kvrocks and HAProxy pod of the release at once: `kubectl delete pod -l app.kubernetes.io/instance=<release>`.
+3. The pods come back with the new password and pick the master from the state they saved, as after a power cut (scenario `full_outage`). Update the clients.
+
+This procedure itself has not been run end to end.
 
 ## What a failure costs
 
@@ -165,9 +216,10 @@ Three more scenarios write 2 000 keys, then kill every node at once and check th
 
 - **Replication is asynchronous.** When the master crashes, the last writes it acknowledged and had not sent to a replica yet are lost.
 - **Fencing is not instant.** A master cut off from its peers keeps taking writes on the connections already open to it for about two seconds, the time the fencing loop waits before it concludes that no majority of Sentinels confirms it any more. Those writes are lost.
+- **A slow start can cost a full sync.** A pod picks its role before RocksDB opens. If opening a large database takes longer than `sentinel.downAfterMilliseconds`, Sentinel may fail over meanwhile, and the pod starts as a master nobody routes to. Sentinel then demotes it, and it copies the whole database again. No write is lost.
 - **Fencing has a cost.** A healthy master also stops taking writes when two Sentinels out of three are down. HAProxy already refuses new connections in that case.
 - **A rolling update can move the master several times.** Kubernetes restarts the pods from the highest ordinal down, and Sentinel may hand the role to the next pod to restart. Each move pauses writes for about 3 s without losing any, but a rolling update can take up to three of them.
-- **Password rotation is not handled.** Changing the Secret restarts nothing, and pods that restart later with the new password can no longer talk to the others. Plan a maintenance window, or reinstall.
+- **Password rotation is not automatic.** Changing the Secret restarts nothing, and pods that restart later with the new password can no longer talk to the others. Follow [Rotating the password](#rotating-the-password).
 - **Changing `replicaCount` is not handled.** Scaling down in particular can remove the pod that is the master.
 - **No TLS yet.** Neither for clients nor for replication. It is the next thing I plan to add.
 - **Not tested behind a service mesh.**
@@ -179,12 +231,14 @@ Three more scenarios write 2 000 keys, then kill every node at once and check th
 ## Tests
 
 ```bash
-make test        # lint, Kubernetes schemas, helm-unittest, alert rules, load generator
+make test        # lint, Kubernetes schemas, helm-unittest, script tests, alert rules, load generator
 make e2e-quick   # handover, rolling update and master crash on a local Kind cluster
 make e2e         # every failure scenario
 ```
 
-`make test` needs `helm` with the `unittest` and `schema` plugins, `shellcheck`, `kubeconform`, `promtool`, `yq` and `uv`. The end-to-end targets need `docker`, `kind`, `kubectl` and `jq`.
+`make test` needs `helm` with the `unittest` and `schema` plugins, `shellcheck`, `kubeconform`, `promtool`, `yq`, `uv` and `docker`. The end-to-end targets also need `kind`, `kubectl` and `jq`.
+
+The scripts that run in the pods have unit tests of their own in [`tests/scripts`](tests/scripts): each runs in the image it runs in production, dash for Kvrocks and busybox for Sentinel, against a fake `redis-cli` that plays a whole cluster, unreachable hosts and DNS outages included.
 
 The end-to-end scenarios break something while 4 clients write through HAProxy over persistent connections, then read every acknowledged key back from the write endpoint and from each pod. They live in [`tests/e2e/scenarios.sh`](tests/e2e/scenarios.sh).
 
