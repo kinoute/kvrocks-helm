@@ -64,7 +64,11 @@ data:
     {{- range $ordinal := $ordinals }}
     {{- $pod := include "kvrocks.podFqdn" (dict "root" $ "ordinal" $ordinal) }}
 
-    # One server per Sentinel, up while that Sentinel names pod {{ $ordinal }} as master.
+    # One server per Sentinel, up while that Sentinel names pod {{ $ordinal }} as master and
+    # has a live link to it. Naming is not enough: a master pod recreated with a new address
+    # is named by every Sentinel while their links still hang on the old address, sometimes
+    # for longer than down-after-milliseconds. Writes routed to it then are lost when Sentinel
+    # fails over to a replica that never got them.
     backend sentinel_votes_{{ $ordinal }}
       option tcp-check
       tcp-check connect
@@ -72,12 +76,18 @@ data:
       tcp-check send "AUTH ${KVROCKS_PASSWORD}\r\n"
       tcp-check expect string +OK
       {{- end }}
-      tcp-check send "SENTINEL get-master-addr-by-name {{ $.Values.sentinel.masterName }}\r\n"
-      # The port ends the reply, so the host before it has arrived in full. Sentinel watches
-      # the port in clear, which TLS moves off the client port...
-      tcp-check expect string {{ include "kvrocks.internalPort" $ }}
-      # ...and a missing name is a "no" right away, instead of a wait for the check timeout.
+      tcp-check send "SENTINEL MASTER {{ $.Values.sentinel.masterName }}\r\n"
+      # This field follows the address, the flags and last-ok-ping-reply: once it is there,
+      # they are complete...
+      tcp-check expect string last-ping-reply
+      # ...so that a "no" is given right away, instead of a wait for the check timeout.
       tcp-check expect min-recv 0 string {{ $pod }}
+      # "master" alone: neither s_down, nor in the middle of a failover.
+      tcp-check expect min-recv 0 string "flags\r\n\$6\r\nmaster\r\n"
+      # A valid reply to a ping less than 2 s ago, Sentinel pinging every second. The flags do
+      # not show a link that hangs on a former address: it is not "disconnected" while its
+      # connection is pending. The value has 1 to 3 digits, or 4 starting with 1.
+      tcp-check expect min-recv 0 rstring "last-ok-ping-reply\r\n.([123]\r\n|4\r\n1)"
       {{- range $sentinel := $ordinals }}
       # A vote is re-read at every check, so a single answer flips it (fall 1, rise 1).
       server sentinel_{{ $sentinel }} {{ include "kvrocks.podFqdn" (dict "root" $ "ordinal" $sentinel) }}:{{ $.Values.sentinel.port }} check inter {{ $.Values.haproxy.check.interval }} fall 1 rise 1

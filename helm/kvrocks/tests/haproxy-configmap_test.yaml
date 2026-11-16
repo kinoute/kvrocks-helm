@@ -168,7 +168,23 @@ tests:
     asserts:
       - matchRegex:
           path: data["haproxy.cfg"]
-          pattern: '(?m)^  tcp-check send "SENTINEL get-master-addr-by-name mymaster\\r\\n"$'
+          pattern: '(?m)^  tcp-check send "SENTINEL MASTER mymaster\\r\\n"$'
+
+  # A master pod recreated with a new address is still named by every Sentinel while their
+  # links hang on the old one: only a live link counts as a vote.
+  - it: counts a Sentinel's vote only while it reaches the master and does not see it down
+    asserts:
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: 'backend sentinel_votes_1\n(  .*\n)*?  tcp-check expect string last-ping-reply\n(  #.*\n)*  tcp-check expect min-recv 0 string db-kvrocks-1\.db-kvrocks-headless\.data\.svc\.cluster\.local\n(  #.*\n)*  tcp-check expect min-recv 0 string "flags\\r\\n\\\$6\\r\\nmaster\\r\\n"\n'
+
+  # Sentinel clears "disconnected" as soon as it starts connecting, so the flags stay
+  # "master" while its link hangs on the former address of a recreated pod.
+  - it: counts a Sentinel's vote only if it got a reply to a ping in the last 2 seconds
+    asserts:
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: 'backend sentinel_votes_1\n(  .*\n)*?  tcp-check expect min-recv 0 rstring "last-ok-ping-reply\\r\\n\.\(\[123\]\\r\\n\|4\\r\\n1\)"\n'
 
   - it: flips a Sentinel vote on a single answer
     asserts:
@@ -282,7 +298,7 @@ tests:
           pattern: 'backend kvrocks_0\n  option tcp-check\n  tcp-check connect\n  tcp-check send "INFO replication\\r\\n"\n'
       - matchRegex:
           path: data["haproxy.cfg"]
-          pattern: 'backend sentinel_votes_0\n  option tcp-check\n  tcp-check connect\n  tcp-check send "SENTINEL get-master-addr-by-name kvrocks\\r\\n"\n'
+          pattern: 'backend sentinel_votes_0\n  option tcp-check\n  tcp-check connect\n  tcp-check send "SENTINEL MASTER kvrocks\\r\\n"\n'
 
   - it: never contains the password itself
     asserts:

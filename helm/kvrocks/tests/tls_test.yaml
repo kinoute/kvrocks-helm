@@ -156,17 +156,6 @@ tests:
           path: data["haproxy.cfg"]
           pattern: 'server kvrocks_0 db-kvrocks-0\.db-kvrocks-headless\.data\.svc\.cluster\.local:6379 check port 6666 '
 
-  # Sentinel monitors the port in clear: its answer ends with 6666, never with 6379.
-  - it: reads the Sentinel votes against the port Sentinel monitors
-    template: haproxy/configmap.yaml
-    asserts:
-      - matchRegex:
-          path: data["haproxy.cfg"]
-          pattern: 'SENTINEL get-master-addr-by-name kvrocks\\r\\n"\n(  #.*\n)*  tcp-check expect string 6666\n'
-      - notMatchRegex:
-          path: data["haproxy.cfg"]
-          pattern: 'tcp-check expect string 6379'
-
   - it: keeps the write endpoint on a fixed node port when asked
     template: service.yaml
     set:
