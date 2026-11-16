@@ -173,9 +173,11 @@ Do not use a plain `SENTINEL FAILOVER` for that. Sentinel promotes a replica whi
 Each pod holds a full copy of the data. Give its volume at least twice the size of the data, plus the RocksDB write-ahead log:
 
 - a full sync downloads a complete checkpoint before it replaces the old database, so a replica needs room for both copies at once ([`storage.cc`](https://github.com/apache/kvrocks/blob/v2.17.0/src/storage/storage.cc));
-- the master keeps its write-ahead log for replicas that fall behind, up to `rocksdb.wal_size_limit_mb` (16 GB by default) or `rocksdb.wal_ttl_seconds` (3 h).
+- every pod keeps its write-ahead log for replicas that fall behind, up to `rocksdb.wal_size_limit_mb` (16 GB by default) or `rocksdb.wal_ttl_seconds` (3 h). After a burst of writes, that log weighs as much as what was written.
 
-A full sync happens when a pod is new or lost its volume, and when a former master comes back with writes the new master never got. Its duration grows with the data. Nothing in this repository has been measured above a few gigabytes yet.
+A full sync happens when a pod is new or lost its volume, and when a former master comes back with writes the new master never got. Its duration grows with the data.
+
+With 10 GiB written on a real cluster (see [On a real cluster](#on-a-real-cluster)), each pod held 13.6 GB of data and, right after the writes, 12 to 15 GB of archived log on top of it. A full sync of those 13.6 GB took 5 minutes. As a rule of thumb, give each volume twice the data plus 16 GB.
 
 Set `resources` too: with none, the pods run as BestEffort and are the first evicted under memory pressure.
 
@@ -254,6 +256,13 @@ Measured on 2026-11-16 with `make e2e-cluster`, on a managed Kubernetes 1.34 clu
 | Handover with the NetworkPolicy on | 55 330 | 0 | 2.1 s |
 
 Two differences with Kind. A new volume takes longer to come than Sentinel takes to fail over, so the master that lost its volume restarts as a replica and the empty-volume guard has nothing to do. And a master pod deleted with `--force` usually ends in a failover, for the reason above: out of four runs, the Sentinels reached the recreated pod in time once (3 s without writes) and failed over three times (about 14 s), without losing a write.
+
+With data: `large_dataset` wrote 10 GiB shaped like a production workload, 30.4 million keys of which 90 % small hashes, through HAProxy over mutual TLS. It took 57 minutes: the nodes, busy compacting, were the limit, not the chart. Then:
+
+- each pod held 13.6 GB of SST files, plus 12 to 15 GB of archived write-ahead log on the pods that had taken the writes live;
+- a replica that lost its volume copied everything back in 5 min 7 s, about 45 MB/s;
+- a replica restarted on its full volume was ready in 20 s, by partial resync;
+- a handover and a rolling update lost no write, paused them for 2.2 s and 3.8 s, and caused no full sync.
 
 ## Caveats
 
