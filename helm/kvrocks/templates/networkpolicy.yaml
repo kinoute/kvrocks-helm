@@ -1,4 +1,5 @@
-{{- if .Values.networkPolicy.enabled }}
+{{- /* With TLS the policy is always there: the port in clear must stay inside the release. */}}
+{{- if or .Values.networkPolicy.enabled .Values.tls.enabled }}
 {{- $kvrocksPods := include "kvrocks.selectorLabels" (dict "root" . "component" "kvrocks") }}
 {{- $haproxyPods := include "kvrocks.selectorLabels" (dict "root" . "component" "haproxy") }}
 apiVersion: networking.k8s.io/v1
@@ -28,12 +29,16 @@ spec:
               {{- $haproxyPods | nindent 14 }}
       ports:
         - port: {{ .Values.port }}
+        {{- if .Values.tls.enabled }}
+        - port: {{ .Values.tls.internalPort }}
+        {{- end }}
         - port: {{ .Values.sentinel.port }}
     {{- end }}
-    # Clients of the read Service, and Sentinel-aware clients.
+    # Clients of the read Service, and Sentinel-aware clients. With TLS, Sentinel speaks in
+    # clear and stays inside the release: clients only get the TLS port.
     - ports:
         - port: {{ .Values.port }}
-        {{- if include "kvrocks.isReplication" . }}
+        {{- if and (include "kvrocks.isReplication" .) (not .Values.tls.enabled) }}
         - port: {{ .Values.sentinel.port }}
         {{- end }}
       {{- with .Values.networkPolicy.clientsFrom }}

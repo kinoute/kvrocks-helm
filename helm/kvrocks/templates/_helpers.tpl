@@ -97,6 +97,11 @@ run the new scripts with its old environment.
 {{- end }}
 {{- end }}
 
+{{/* The port in clear for the traffic inside the release: the client port without TLS. */}}
+{{- define "kvrocks.internalPort" -}}
+{{- if .Values.tls.enabled }}{{ .Values.tls.internalPort }}{{ else }}{{ .Values.port }}{{ end }}
+{{- end }}
+
 {{- define "kvrocks.headlessServiceName" -}}
 {{- printf "%s-headless" (include "kvrocks.fullname" .) }}
 {{- end }}
@@ -150,7 +155,7 @@ large integer as 2.68e+08; an unquoted YAML yes/no arrives as a boolean.
 
 {{/* Settings the chart writes itself; letting `config` override them would break the topology. */}}
 {{- define "kvrocks.reservedConfigKeys" -}}
-bind port dir pidfile log-dir daemonize cluster-enabled requirepass masterauth slaveof replicaof replica-announce-ip replica-announce-port
+bind port dir pidfile log-dir daemonize cluster-enabled requirepass masterauth slaveof replicaof replica-announce-ip replica-announce-port tls-port tls-cert-file tls-key-file tls-ca-cert-file tls-auth-clients tls-protocols tls-replication
 {{- end }}
 
 {{/* Fails the render on values that would produce a broken or unsafe deployment. */}}
@@ -160,6 +165,17 @@ bind port dir pidfile log-dir daemonize cluster-enabled requirepass masterauth s
 {{- end }}
 {{- if regexMatch "[\\s\"'\\\\]" (toString .Values.auth.password) }}
 {{- fail "auth.password must not contain whitespace, quotes or backslashes: HAProxy sends it in its health checks" }}
+{{- end }}
+{{- if .Values.tls.enabled }}
+{{- if not .Values.tls.existingSecret }}
+{{- fail "tls.enabled needs tls.existingSecret, the Secret with the server certificate" }}
+{{- end }}
+{{- if and .Values.tls.authClients (not .Values.tls.ca.secret) }}
+{{- fail "tls.authClients needs tls.ca.secret, the CA client certificates must chain to" }}
+{{- end }}
+{{- if eq (int .Values.tls.internalPort) (int .Values.port) }}
+{{- fail "tls.internalPort must differ from port: Kvrocks serves TLS on port and keeps internalPort in clear" }}
+{{- end }}
 {{- end }}
 {{- range $key := splitList " " (include "kvrocks.reservedConfigKeys" .) }}
 {{- if hasKey $.Values.config $key }}
@@ -201,7 +217,7 @@ bind port dir pidfile log-dir daemonize cluster-enabled requirepass masterauth s
 - name: KVROCKS_REPLICAS
   value: {{ include "kvrocks.replicaCount" . | quote }}
 - name: KVROCKS_PORT
-  value: {{ .Values.port | quote }}
+  value: {{ include "kvrocks.internalPort" . | quote }}
 - name: SENTINEL_PORT
   value: {{ .Values.sentinel.port | quote }}
 - name: SENTINEL_MASTER_NAME

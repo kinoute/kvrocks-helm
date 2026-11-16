@@ -1,5 +1,8 @@
 {{- $writeService := or (include "kvrocks.haproxyEnabled" .) (not (include "kvrocks.isReplication" .)) }}
-{{- if $writeService }}
+{{- $tls := .Values.tls.enabled }}
+{{- /* Under mTLS the test needs a client certificate of its own. */}}
+{{- $canConnect := or (not $tls) (not .Values.tls.authClients) .Values.tls.clientSecret }}
+{{- if and $writeService $canConnect }}
 # `helm test`: a write through the write endpoint must be accepted and read back.
 apiVersion: v1
 kind: Pod
@@ -29,15 +32,43 @@ spec:
           value: {{ include "kvrocks.fullname" . }}
         - name: WRITE_PORT
           value: {{ .Values.service.port | quote }}
+        - name: TLS_ARGS
+          {{- if not $tls }}
+          value: ""
+          {{- else if .Values.tls.clientSecret }}
+          value: "--tls --cacert /tls/ca/ca.crt --cert /tls/client/tls.crt --key /tls/client/tls.key"
+          {{- else }}
+          value: "--tls --insecure"
+          {{- end }}
       command:
         - sh
         - -ec
         - |
           export REDISCLI_AUTH="${KVROCKS_PASSWORD:-}"
+          cli() { MALLOC_CONF= redis-cli -h "$WRITE_HOST" -p "$WRITE_PORT" $TLS_ARGS "$@"; }
           key="helm-test:$(date +%s)"
-          redis-cli -h "$WRITE_HOST" -p "$WRITE_PORT" set "$key" ok | grep -q OK
-          redis-cli -h "$WRITE_HOST" -p "$WRITE_PORT" get "$key" | grep -q ok
-          redis-cli -h "$WRITE_HOST" -p "$WRITE_PORT" del "$key" >/dev/null
+          cli set "$key" ok | grep -q OK
+          cli get "$key" | grep -q ok
+          cli del "$key" >/dev/null
       securityContext:
         {{- toYaml .Values.containerSecurityContext | nindent 8 }}
+      {{- if and $tls .Values.tls.clientSecret }}
+      volumeMounts:
+        - name: tls-client
+          mountPath: /tls/client
+          readOnly: true
+        - name: tls-ca
+          mountPath: /tls/ca
+          readOnly: true
+  volumes:
+    - name: tls-client
+      secret:
+        secretName: {{ .Values.tls.clientSecret }}
+    - name: tls-ca
+      secret:
+        secretName: {{ .Values.tls.ca.secret }}
+        items:
+          - key: {{ .Values.tls.ca.key }}
+            path: ca.crt
+      {{- end }}
 {{- end }}

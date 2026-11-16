@@ -1,0 +1,227 @@
+suite: TLS in front of Kvrocks
+release:
+  name: db
+  namespace: data
+set:
+  auth.password: test-password
+  tls.enabled: true
+  tls.existingSecret: db-server-tls
+  tls.ca.secret: db-ca
+tests:
+  # --- Kvrocks configuration ---
+
+  - it: serves clients over TLS on the client port and keeps a port in clear inside
+    template: configmap.yaml
+    asserts:
+      - matchRegex:
+          path: data["kvrocks.conf"]
+          pattern: (?m)^port 6666$
+      - matchRegex:
+          path: data["kvrocks.conf"]
+          pattern: (?m)^tls-port 6379$
+      - matchRegex:
+          path: data["kvrocks.conf"]
+          pattern: (?m)^tls-cert-file /tls/server/tls.crt$
+      - matchRegex:
+          path: data["kvrocks.conf"]
+          pattern: (?m)^tls-key-file /tls/server/tls.key$
+      - matchRegex:
+          path: data["kvrocks.conf"]
+          pattern: (?m)^tls-ca-cert-file /tls/ca/ca.crt$
+
+  - it: requires client certificates and TLS 1.3 by default
+    template: configmap.yaml
+    asserts:
+      - matchRegex:
+          path: data["kvrocks.conf"]
+          pattern: (?m)^tls-auth-clients yes$
+      - matchRegex:
+          path: data["kvrocks.conf"]
+          pattern: (?m)^tls-protocols "TLSv1.3"$
+
+  - it: can serve TLS without requiring client certificates
+    template: configmap.yaml
+    set:
+      tls.authClients: false
+      tls.ca.secret: ""
+    asserts:
+      - matchRegex:
+          path: data["kvrocks.conf"]
+          pattern: (?m)^tls-auth-clients no$
+      - notMatchRegex:
+          path: data["kvrocks.conf"]
+          pattern: tls-ca-cert-file
+
+  - it: keeps replication in clear, between the pods only
+    template: configmap.yaml
+    asserts:
+      - notMatchRegex:
+          path: data["kvrocks.conf"]
+          pattern: tls-replication
+
+  - it: writes no TLS setting without TLS
+    template: configmap.yaml
+    set:
+      tls.enabled: false
+    asserts:
+      - matchRegex:
+          path: data["kvrocks.conf"]
+          pattern: (?m)^port 6379$
+      - notMatchRegex:
+          path: data["kvrocks.conf"]
+          pattern: tls-
+
+  # --- Pods ---
+
+  - it: mounts the server certificate and the CA bundle under the key given
+    template: statefulset.yaml
+    set:
+      tls.ca.key: full-bundle.crt
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: tls-ca
+            secret:
+              secretName: db-ca
+              # 0444 in the template; YAML reads the octal as 292.
+              defaultMode: 292
+              items:
+                - key: full-bundle.crt
+                  path: ca.crt
+      - equal:
+          path: spec.template.spec.volumes[?(@.name == "tls-server")].secret.secretName
+          value: db-server-tls
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].volumeMounts
+          content:
+            name: tls-server
+            mountPath: /tls/server
+            readOnly: true
+
+  - it: exposes the client port and the port in clear on the kvrocks container
+    template: statefulset.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].ports
+          content:
+            name: kvrocks
+            containerPort: 6379
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].ports
+          content:
+            name: internal
+            containerPort: 6666
+
+  - it: points the scripts, Sentinel and the exporter at the port in clear
+    template: statefulset.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].env
+          content:
+            name: KVROCKS_PORT
+            value: "6666"
+      - contains:
+          path: spec.template.spec.initContainers[?(@.name == "sentinel")].env
+          content:
+            name: KVROCKS_PORT
+            value: "6666"
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "metrics")].env
+          content:
+            name: KVROCKS_ADDR
+            value: redis://localhost:6666
+
+  - it: lets Reloader restart the pods when the certificate Secrets change
+    template: statefulset.yaml
+    set:
+      tls.reloader: true
+    asserts:
+      - equal:
+          path: metadata.annotations["secret.reloader.stakater.com/reload"]
+          value: db-server-tls,db-ca
+
+  - it: adds no Reloader annotation unless asked
+    template: statefulset.yaml
+    asserts:
+      - notExists:
+          path: metadata.annotations
+
+  # --- HAProxy ---
+
+  - it: passes client traffic through to the TLS port and checks the role in clear
+    template: haproxy/configmap.yaml
+    asserts:
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: 'server kvrocks_0 db-kvrocks-0\.db-kvrocks-headless\.data\.svc\.cluster\.local:6379 check port 6666 '
+
+  # Sentinel monitors the port in clear: its answer ends with 6666, never with 6379.
+  - it: reads the Sentinel votes against the port Sentinel monitors
+    template: haproxy/configmap.yaml
+    asserts:
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: 'SENTINEL get-master-addr-by-name kvrocks\\r\\n"\n(  #.*\n)*  tcp-check expect string 6666\n'
+      - notMatchRegex:
+          path: data["haproxy.cfg"]
+          pattern: 'tcp-check expect string 6379'
+
+  - it: keeps the write endpoint on a fixed node port when asked
+    template: service.yaml
+    set:
+      service.type: NodePort
+      service.nodePort: 30007
+    asserts:
+      - equal:
+          path: spec.ports[0].nodePort
+          value: 30007
+
+  # --- Network ---
+
+  - it: always closes the port in clear to pods outside the release
+    template: networkpolicy.yaml
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: spec.ingress[0].ports
+          value:
+            - port: 6379
+            - port: 6666
+            - port: 26379
+      - equal:
+          path: spec.ingress[1].ports
+          value:
+            - port: 6379
+
+  - it: also exposes the port in clear on the headless Service, for the pods
+    template: service-headless.yaml
+    asserts:
+      - contains:
+          path: spec.ports
+          content:
+            name: internal
+            port: 6666
+            targetPort: internal
+
+  # --- helm test ---
+
+  - it: tests a write over mTLS with the client certificate given
+    template: tests/test-write.yaml
+    set:
+      tls.clientSecret: db-client-tls
+    asserts:
+      - contains:
+          path: spec.containers[0].env
+          content:
+            name: TLS_ARGS
+            value: --tls --cacert /tls/ca/ca.crt --cert /tls/client/tls.crt --key /tls/client/tls.key
+      - equal:
+          path: spec.volumes[?(@.name == "tls-client")].secret.secretName
+          value: db-client-tls
+
+  - it: has no test to run under mTLS without a client certificate
+    template: tests/test-write.yaml
+    asserts:
+      - hasDocuments:
+          count: 0

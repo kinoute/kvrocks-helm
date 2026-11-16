@@ -41,8 +41,37 @@ auth:
   # It must not contain whitespace, double quotes or backslashes.
   password: ""
 
-# -- Port Kvrocks listens on in each pod.
+# -- Port clients reach Kvrocks on. With TLS it is the TLS port, and the traffic that stays
+# inside the release (replication, Sentinel, probes, exporter) uses `tls.internalPort`.
 port: 6379 # @schema minimum:1;maximum:65535
+
+tls:
+  # -- Serves clients over TLS on `port`. Replication, Sentinel, the probes and the exporter
+  # stay in clear on `tls.internalPort`, which a NetworkPolicy then closes to every pod
+  # outside the release.
+  enabled: false
+  # -- Port in clear for the traffic inside the release: Kvrocks cannot turn its plain
+  # port off.
+  internalPort: 6666 # @schema minimum:1;maximum:65535
+  # -- Secret of type `kubernetes.io/tls` with the server certificate (`tls.crt`, `tls.key`).
+  # It must cover the names clients connect to, such as the write Service.
+  existingSecret: ""
+  ca:
+    # -- Secret with the CA bundle client certificates must chain to. Required with
+    # `authClients`.
+    secret: ""
+    # -- Key of the bundle in that Secret.
+    key: ca.crt
+  # -- Requires clients to present a certificate signed by that CA (mTLS).
+  authClients: true
+  # -- TLS versions Kvrocks accepts.
+  protocols: TLSv1.3
+  # -- Secret of type `kubernetes.io/tls` with a client certificate signed by the CA, used
+  # by `helm test`. Without it and with `authClients`, `helm test` has nothing to run.
+  clientSecret: ""
+  # -- Annotates the StatefulSet so that Reloader restarts it, one handover at a time,
+  # when the certificate Secrets change.
+  reloader: false
 
 # -- Extra `kvrocks.conf` settings, as `key: value`. Settings the chart owns (bind, port,
 # dir, the password, the replication role...) are rejected.
@@ -131,6 +160,8 @@ serviceAccount:
 service:
   type: ClusterIP # @schema enum:[ClusterIP,NodePort,LoadBalancer]
   port: 6379 # @schema minimum:1;maximum:65535
+  # -- Node port of the write endpoint, with `type: NodePort`. Empty lets Kubernetes pick.
+  nodePort: "" # @schema type:[string,integer]
   annotations: {} # @schema additionalProperties:true
 
 # -- A second Service that spreads reads over every ready pod, replicas included.

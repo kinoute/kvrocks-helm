@@ -73,8 +73,9 @@ data:
       tcp-check expect string +OK
       {{- end }}
       tcp-check send "SENTINEL get-master-addr-by-name {{ $.Values.sentinel.masterName }}\r\n"
-      # The port ends the reply, so the host before it has arrived in full...
-      tcp-check expect string {{ $.Values.port }}
+      # The port ends the reply, so the host before it has arrived in full. Sentinel watches
+      # the port in clear, which TLS moves off the client port...
+      tcp-check expect string {{ include "kvrocks.internalPort" $ }}
       # ...and a missing name is a "no" right away, instead of a wait for the check timeout.
       tcp-check expect min-recv 0 string {{ $pod }}
       {{- range $sentinel := $ordinals }}
@@ -93,6 +94,8 @@ data:
       # Wait for the role line, then decide at once: a replica is a "no", not a timeout.
       tcp-check expect string role:
       tcp-check expect min-recv 0 string role:master
-      server kvrocks_{{ $ordinal }} {{ $pod }}:{{ $.Values.port }} check inter {{ $.Values.haproxy.check.interval }} fall {{ $.Values.haproxy.check.fall }} rise 1 on-marked-down shutdown-sessions
+      # Client traffic goes to the client port, TLS included, untouched; the checks read the
+      # role on the port in clear.
+      server kvrocks_{{ $ordinal }} {{ $pod }}:{{ $.Values.port }} check port {{ include "kvrocks.internalPort" $ }} inter {{ $.Values.haproxy.check.interval }} fall {{ $.Values.haproxy.check.fall }} rise 1 on-marked-down shutdown-sessions
     {{- end }}
 {{- end }}

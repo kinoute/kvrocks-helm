@@ -667,6 +667,12 @@
           "properties": {},
           "type": "object"
         },
+        "nodePort": {
+          "type": [
+            "string",
+            "integer"
+          ]
+        },
         "port": {
           "maximum": 65535,
           "minimum": 1,
@@ -727,6 +733,47 @@
     },
     "terminationGracePeriodSeconds": {
       "type": "integer"
+    },
+    "tls": {
+      "additionalProperties": false,
+      "properties": {
+        "authClients": {
+          "type": "boolean"
+        },
+        "ca": {
+          "additionalProperties": false,
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "secret": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "clientSecret": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "existingSecret": {
+          "type": "string"
+        },
+        "internalPort": {
+          "maximum": 65535,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "protocols": {
+          "type": "string"
+        },
+        "reloader": {
+          "type": "boolean"
+        }
+      },
+      "type": "object"
     },
     "tolerations": {
       "type": "array"

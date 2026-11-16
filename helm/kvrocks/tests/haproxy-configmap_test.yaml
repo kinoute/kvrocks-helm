@@ -257,7 +257,7 @@ tests:
     asserts:
       - matchRegex:
           path: data["haproxy.cfg"]
-          pattern: 'backend kvrocks_0\n(  .*\n)*?  tcp-check expect min-recv 0 string role:master\n  server kvrocks_0 \S+ check inter 1s fall 3 rise 1 on-marked-down shutdown-sessions\n'
+          pattern: 'backend kvrocks_0\n(  .*\n)*?  tcp-check expect min-recv 0 string role:master\n(  #.*\n)*  server kvrocks_0 \S+ check port 6379 inter 1s fall 3 rise 1 on-marked-down shutdown-sessions\n'
 
   # --- Authentication of the health checks ---
 
@@ -298,7 +298,7 @@ tests:
     asserts:
       - matchRegex:
           path: data["haproxy.cfg"]
-          pattern: '(?m)^  server kvrocks_0 \S+ check inter 500ms '
+          pattern: '(?m)^  server kvrocks_0 \S+ check port 6379 inter 500ms '
       - matchRegex:
           path: data["haproxy.cfg"]
           pattern: '(?m)^  server sentinel_0 \S+ check inter 500ms '
@@ -312,7 +312,7 @@ tests:
     asserts:
       - matchRegex:
           path: data["haproxy.cfg"]
-          pattern: '(?m)^  server kvrocks_0 \S+ check inter 1s fall 5 rise 1 '
+          pattern: '(?m)^  server kvrocks_0 \S+ check port 6379 inter 1s fall 5 rise 1 '
       # haproxy.check.fall is about Kvrocks only: a Sentinel vote still flips at once.
       - matchRegex:
           path: data["haproxy.cfg"]

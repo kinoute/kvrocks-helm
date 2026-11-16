@@ -251,3 +251,43 @@ tests:
       auth.password: "p#ss%w&rd!"
     asserts:
       - notFailedTemplate: {}
+
+  # --- TLS ---
+
+  - it: refuses TLS without the server certificate Secret
+    set:
+      tls.enabled: true
+      tls.existingSecret: ""
+      tls.ca.secret: db-ca
+    asserts:
+      - failedTemplate:
+          errorMessage: tls.enabled needs tls.existingSecret, the Secret with the server certificate
+
+  - it: refuses mTLS without the CA client certificates must chain to
+    set:
+      tls.enabled: true
+      tls.existingSecret: db-server-tls
+      tls.ca.secret: ""
+    asserts:
+      - failedTemplate:
+          errorMessage: tls.authClients needs tls.ca.secret, the CA client certificates must chain to
+
+  - it: refuses the same port for TLS and in clear
+    set:
+      tls.enabled: true
+      tls.existingSecret: db-server-tls
+      tls.ca.secret: db-ca
+      tls.internalPort: 6379
+    asserts:
+      - failedTemplate:
+          errorMessage: "tls.internalPort must differ from port: Kvrocks serves TLS on port and keeps internalPort in clear"
+
+  - it: refuses TLS settings in config, where they would fight the chart's
+    set:
+      tls.enabled: true
+      tls.existingSecret: db-server-tls
+      tls.ca.secret: db-ca
+      config.tls-port: 7000
+    asserts:
+      - failedTemplate:
+          errorMessage: config.tls-port is managed by the chart and cannot be overridden

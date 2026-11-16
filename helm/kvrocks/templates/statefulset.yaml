@@ -7,6 +7,10 @@ metadata:
   labels:
     {{- include "kvrocks.labels" . | nindent 4 }}
     app.kubernetes.io/component: kvrocks
+  {{- if and .Values.tls.enabled .Values.tls.reloader }}
+  annotations:
+    secret.reloader.stakater.com/reload: {{ compact (list .Values.tls.existingSecret .Values.tls.ca.secret) | join "," | quote }}
+  {{- end }}
 spec:
   replicas: {{ include "kvrocks.replicaCount" . }}
   serviceName: {{ include "kvrocks.headlessServiceName" . }}
@@ -157,6 +161,10 @@ spec:
           ports:
             - name: kvrocks
               containerPort: {{ .Values.port }}
+            {{- if .Values.tls.enabled }}
+            - name: internal
+              containerPort: {{ .Values.tls.internalPort }}
+            {{- end }}
           startupProbe:
             exec:
               command: ["/scripts/kvrocks-probe.sh", "startup"]
@@ -190,13 +198,23 @@ spec:
               readOnly: true
             - name: tmp
               mountPath: /tmp
+            {{- if .Values.tls.enabled }}
+            - name: tls-server
+              mountPath: /tls/server
+              readOnly: true
+            {{- if .Values.tls.ca.secret }}
+            - name: tls-ca
+              mountPath: /tls/ca
+              readOnly: true
+            {{- end }}
+            {{- end }}
         {{- if .Values.metrics.enabled }}
         - name: metrics
           image: {{ include "kvrocks.image" (dict "root" . "image" .Values.metrics.image "defaultTag" "") }}
           imagePullPolicy: {{ .Values.metrics.image.pullPolicy }}
           env:
             - name: KVROCKS_ADDR
-              value: redis://localhost:{{ .Values.port }}
+              value: redis://localhost:{{ include "kvrocks.internalPort" . }}
             {{- include "kvrocks.passwordEnv" . | nindent 12 }}
           ports:
             - name: metrics
@@ -224,6 +242,26 @@ spec:
         # Writable scratch space with a read-only root filesystem: the pid file, Sentinel's dir.
         - name: tmp
           emptyDir: {}
+        {{- if .Values.tls.enabled }}
+        - name: tls-server
+          secret:
+            secretName: {{ .Values.tls.existingSecret }}
+            defaultMode: 0440
+            items:
+              - key: tls.crt
+                path: tls.crt
+              - key: tls.key
+                path: tls.key
+        {{- if .Values.tls.ca.secret }}
+        - name: tls-ca
+          secret:
+            secretName: {{ .Values.tls.ca.secret }}
+            defaultMode: 0444
+            items:
+              - key: {{ .Values.tls.ca.key }}
+                path: ca.crt
+        {{- end }}
+        {{- end }}
         {{- if not .Values.persistence.enabled }}
         - name: data
           emptyDir: {}

@@ -21,6 +21,9 @@ spec:
     - name: kvrocks
       port: {{ .Values.service.port }}
       targetPort: kvrocks
+      {{- if and (eq .Values.service.type "NodePort") .Values.service.nodePort }}
+      nodePort: {{ .Values.service.nodePort }}
+      {{- end }}
   selector:
     {{- include "kvrocks.selectorLabels" (dict "root" . "component" (ternary "haproxy" "kvrocks" (not (empty $haproxy)))) | nindent 4 }}
 {{- end }}

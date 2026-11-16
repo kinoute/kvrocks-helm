@@ -10,7 +10,17 @@ data:
   # to a writable copy of this file at startup: Kvrocks rewrites its config on failover.
   kvrocks.conf: |
     bind 0.0.0.0
-    port {{ .Values.port }}
+    port {{ include "kvrocks.internalPort" . }}
+    {{- if .Values.tls.enabled }}
+    tls-port {{ .Values.port }}
+    tls-cert-file /tls/server/tls.crt
+    tls-key-file /tls/server/tls.key
+    {{- if .Values.tls.ca.secret }}
+    tls-ca-cert-file /tls/ca/ca.crt
+    {{- end }}
+    tls-auth-clients {{ ternary "yes" "no" .Values.tls.authClients }}
+    tls-protocols "{{ .Values.tls.protocols }}"
+    {{- end }}
     dir /var/lib/kvrocks
     pidfile /tmp/kvrocks.pid
     log-dir stdout
