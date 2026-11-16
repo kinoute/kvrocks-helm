@@ -1,0 +1,7 @@
+# Values of the end-to-end tests.
+auth:
+  # Exercises the characters the config files and the HAProxy checks must survive.
+  password: "p#ss%w&rd"
+
+persistence:
+  size: 1Gi

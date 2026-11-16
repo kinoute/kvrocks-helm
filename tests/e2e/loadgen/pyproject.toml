@@ -1,0 +1,30 @@
+[project]
+name = "kvrocks-e2e-loadgen"
+version = "0.1.0"
+description = "Write load generator of the kvrocks chart's end-to-end tests"
+requires-python = ">=3.13"
+dependencies = ["redis>=6"]
+
+[dependency-groups]
+dev = ["mypy>=1.15", "pytest>=8", "ruff>=0.9"]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "N", "D"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"test_*.py" = ["D"]
+
+[tool.mypy]
+strict = true
+
+[tool.pytest.ini_options]
+testpaths = ["."]
