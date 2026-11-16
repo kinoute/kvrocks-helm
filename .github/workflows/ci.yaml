@@ -24,7 +24,7 @@ jobs:
       - uses: azure/setup-helm@v5
         with:
           version: ${{ env.HELM_VERSION }}
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.3.3
       - name: Install the Helm plugins, kubeconform and promtool
         run: |
           helm plugin install https://github.com/helm-unittest/helm-unittest \
