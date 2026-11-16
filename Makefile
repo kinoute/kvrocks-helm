@@ -48,7 +48,7 @@ rules: ## Unit tests of the alert rules
 loadgen: ## Lint, types and tests of the load generator used by the end-to-end scenarios
 	cd $(LOADGEN) && uv sync --dev --frozen
 	cd $(LOADGEN) && uv run ruff format --check . && uv run ruff check .
-	cd $(LOADGEN) && uv run mypy loadgen.py test_loadgen.py && uv run pytest -q
+	cd $(LOADGEN) && uv run mypy loadgen.py dataset.py test_loadgen.py test_dataset.py && uv run pytest -q
 
 e2e: ## Every failure scenario on a local Kind cluster (needs docker, kind, kubectl, jq)
 	tests/e2e/run.sh
