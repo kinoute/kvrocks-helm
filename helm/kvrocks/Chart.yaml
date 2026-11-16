@@ -1,0 +1,22 @@
+apiVersion: v2
+name: kvrocks
+description: >-
+  Apache Kvrocks with replication and automatic failover: one master and its replicas,
+  Sentinel for failover, HAProxy as a write endpoint that follows the master.
+type: application
+version: 0.1.0
+appVersion: "2.17.0"
+kubeVersion: ">=1.29.0-0"
+home: https://github.com/kinoute/kvrocks-helm
+sources:
+  - https://github.com/kinoute/kvrocks-helm
+  - https://github.com/apache/kvrocks
+keywords:
+  - kvrocks
+  - redis
+  - rocksdb
+  - sentinel
+  - high-availability
+maintainers:
+  - name: kinoute
+    url: https://github.com/kinoute

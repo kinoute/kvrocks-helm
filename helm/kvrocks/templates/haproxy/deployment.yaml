@@ -1,0 +1,106 @@
+{{- if include "kvrocks.haproxyEnabled" . }}
+{{- $selectorLabels := include "kvrocks.selectorLabels" (dict "root" . "component" "haproxy") }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kvrocks.fullname" . }}-haproxy
+  labels:
+    {{- include "kvrocks.labels" . | nindent 4 }}
+    app.kubernetes.io/component: haproxy
+spec:
+  replicas: {{ .Values.haproxy.replicaCount }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # Every HAProxy pod carries client connections: add a pod before removing one.
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      {{- $selectorLabels | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "kvrocks.labels" . | nindent 8 }}
+        app.kubernetes.io/component: haproxy
+        {{- with .Values.haproxy.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/haproxy/configmap.yaml") . | sha256sum }}
+        {{- with .Values.haproxy.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "kvrocks.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      {{- include "kvrocks.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        {{- toYaml .Values.haproxy.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: {{ .Values.haproxy.terminationGracePeriodSeconds }}
+      {{- with .Values.haproxy.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      affinity:
+        {{- if .Values.haproxy.affinity }}
+        {{- toYaml .Values.haproxy.affinity | nindent 8 }}
+        {{- else }}
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    {{- $selectorLabels | nindent 20 }}
+        {{- end }}
+      {{- with .Values.haproxy.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.haproxy.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.haproxy.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: haproxy
+          image: {{ include "kvrocks.image" (dict "root" . "image" .Values.haproxy.image "defaultTag" "") }}
+          imagePullPolicy: {{ .Values.haproxy.image.pullPolicy }}
+          {{- with (include "kvrocks.passwordEnv" .) }}
+          env:
+            {{- . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: kvrocks
+              containerPort: {{ .Values.port }}
+            - name: http
+              containerPort: {{ .Values.haproxy.healthPort }}
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            {{- toYaml .Values.haproxy.livenessProbe | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            {{- toYaml .Values.haproxy.readinessProbe | nindent 12 }}
+          {{- with .Values.haproxy.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /usr/local/etc/haproxy
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "kvrocks.fullname" . }}-haproxy
+{{- end }}

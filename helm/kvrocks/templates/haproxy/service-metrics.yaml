@@ -1,0 +1,20 @@
+{{- if and (include "kvrocks.haproxyEnabled" .) .Values.metrics.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "kvrocks.fullname" . }}-haproxy-metrics
+  labels:
+    {{- include "kvrocks.labels" . | nindent 4 }}
+    app.kubernetes.io/component: haproxy
+spec:
+  type: ClusterIP
+  # Headless and separate from the write Service: metrics are scraped pod by pod, and
+  # clients have no business on this port.
+  clusterIP: None
+  ports:
+    - name: metrics
+      port: {{ .Values.haproxy.healthPort }}
+      targetPort: http
+  selector:
+    {{- include "kvrocks.selectorLabels" (dict "root" . "component" "haproxy") | nindent 4 }}
+{{- end }}

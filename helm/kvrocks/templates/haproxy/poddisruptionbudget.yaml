@@ -1,0 +1,14 @@
+{{- if and (include "kvrocks.haproxyEnabled" .) .Values.haproxy.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "kvrocks.fullname" . }}-haproxy
+  labels:
+    {{- include "kvrocks.labels" . | nindent 4 }}
+    app.kubernetes.io/component: haproxy
+spec:
+  maxUnavailable: {{ .Values.haproxy.podDisruptionBudget.maxUnavailable }}
+  selector:
+    matchLabels:
+      {{- include "kvrocks.selectorLabels" (dict "root" . "component" "haproxy") | nindent 6 }}
+{{- end }}

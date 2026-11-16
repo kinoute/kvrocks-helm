@@ -1,0 +1,98 @@
+{{- if include "kvrocks.haproxyEnabled" . }}
+{{- $majority := include "kvrocks.majority" . }}
+{{- $ordinals := until (int .Values.replicaCount) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kvrocks.fullname" . }}-haproxy
+  labels:
+    {{- include "kvrocks.labels" . | nindent 4 }}
+    app.kubernetes.io/component: haproxy
+data:
+  haproxy.cfg: |
+    global
+      log stdout format raw local0 notice
+      maxconn {{ .Values.haproxy.maxConnections | int64 }}
+
+    defaults
+      mode tcp
+      log global
+      timeout connect {{ .Values.haproxy.timeouts.connect }}
+      timeout check {{ .Values.haproxy.timeouts.check }}
+      timeout client {{ .Values.haproxy.timeouts.client }}
+      timeout server {{ .Values.haproxy.timeouts.server }}
+      # The idle timeouts are long; TCP keepalive is what detects a peer that vanished.
+      option clitcpka
+      option srvtcpka
+      # Pod IPs change on restart: resolve at runtime, and start even if a pod is not in DNS yet.
+      default-server init-addr last,libc,none resolvers cluster_dns resolve-prefer ipv4
+
+    resolvers cluster_dns
+      parse-resolv-conf
+      hold valid 1s
+      # Through a DNS outage, keep the last address of each pod instead of dropping the
+      # servers: the health checks, not DNS, decide whether a pod is usable.
+      hold timeout {{ .Values.haproxy.dnsOutageTolerance }}
+      hold refused {{ .Values.haproxy.dnsOutageTolerance }}
+      hold other {{ .Values.haproxy.dnsOutageTolerance }}
+
+    frontend health
+      mode http
+      bind :{{ .Values.haproxy.healthPort }}
+      http-request return status 200 content-type text/plain string "alive" if { path /livez }
+      # Ready only while a master is reachable: an HAProxy cut off from the Sentinels
+      # leaves the Service instead of refusing connections.
+      {{- range $ordinal := $ordinals }}
+      http-request return status 200 content-type text/plain string "master reachable" if { path /readyz } { nbsrv(sentinel_votes_{{ $ordinal }}) ge {{ $majority }} } { nbsrv(kvrocks_{{ $ordinal }}) ge 1 }
+      {{- end }}
+      http-request return status 503 content-type text/plain string "no reachable master" if { path /readyz }
+      {{- if .Values.metrics.enabled }}
+      http-request use-service prometheus-exporter if { path /metrics }
+      {{- end }}
+
+    # Writes go to the pod that a majority of Sentinels names as master, never to a pod that
+    # merely claims the role: a former master still claims it until it is demoted.
+    frontend kvrocks_write
+      bind :{{ .Values.port }}
+      {{- range $ordinal := $ordinals }}
+      use_backend kvrocks_{{ $ordinal }} if { nbsrv(sentinel_votes_{{ $ordinal }}) ge {{ $majority }} }
+      {{- end }}
+      default_backend no_master
+
+    # No majority of Sentinels agrees on a master: refuse connections rather than guess.
+    backend no_master
+    {{- range $ordinal := $ordinals }}
+    {{- $pod := include "kvrocks.podFqdn" (dict "root" $ "ordinal" $ordinal) }}
+
+    # One server per Sentinel, up while that Sentinel names pod {{ $ordinal }} as master.
+    backend sentinel_votes_{{ $ordinal }}
+      option tcp-check
+      tcp-check connect
+      {{- if $.Values.auth.enabled }}
+      tcp-check send "AUTH ${KVROCKS_PASSWORD}\r\n"
+      tcp-check expect string +OK
+      {{- end }}
+      tcp-check send "SENTINEL get-master-addr-by-name {{ $.Values.sentinel.masterName }}\r\n"
+      # The port ends the reply, so the host before it has arrived in full...
+      tcp-check expect string {{ $.Values.port }}
+      # ...and a missing name is a "no" right away, instead of a wait for the check timeout.
+      tcp-check expect min-recv 0 string {{ $pod }}
+      {{- range $sentinel := $ordinals }}
+      # A vote is re-read at every check, so a single answer flips it (fall 1, rise 1).
+      server sentinel_{{ $sentinel }} {{ include "kvrocks.podFqdn" (dict "root" $ "ordinal" $sentinel) }}:{{ $.Values.sentinel.port }} check inter {{ $.Values.haproxy.check.interval }} fall 1 rise 1
+      {{- end }}
+
+    backend kvrocks_{{ $ordinal }}
+      option tcp-check
+      tcp-check connect
+      {{- if $.Values.auth.enabled }}
+      tcp-check send "AUTH ${KVROCKS_PASSWORD}\r\n"
+      tcp-check expect string +OK
+      {{- end }}
+      tcp-check send "INFO replication\r\n"
+      # Wait for the role line, then decide at once: a replica is a "no", not a timeout.
+      tcp-check expect string role:
+      tcp-check expect min-recv 0 string role:master
+      server kvrocks_{{ $ordinal }} {{ $pod }}:{{ $.Values.port }} check inter {{ $.Values.haproxy.check.interval }} fall {{ $.Values.haproxy.check.fall }} rise 1 on-marked-down shutdown-sessions
+    {{- end }}
+{{- end }}

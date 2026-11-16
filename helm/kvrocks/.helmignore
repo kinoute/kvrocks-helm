@@ -1,0 +1,12 @@
+.DS_Store
+.git/
+.gitignore
+*.swp
+*.bak
+*.tmp
+*.orig
+.idea/
+.vscode/
+# helm-unittest suites are not part of the packaged chart. Anchored: a bare `tests/`
+# would also drop templates/tests/, the `helm test` hook.
+/tests/

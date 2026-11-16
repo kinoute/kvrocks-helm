@@ -1,0 +1,16 @@
+{{- if and .Values.podDisruptionBudget.enabled (include "kvrocks.isReplication" .) }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "kvrocks.fullname" . }}
+  labels:
+    {{- include "kvrocks.labels" . | nindent 4 }}
+    app.kubernetes.io/component: kvrocks
+spec:
+  # A replica that is still syncing is not ready and counts as unavailable, so a drain
+  # never takes a second pod while one is catching up.
+  maxUnavailable: {{ .Values.podDisruptionBudget.maxUnavailable }}
+  selector:
+    matchLabels:
+      {{- include "kvrocks.selectorLabels" (dict "root" . "component" "kvrocks") | nindent 6 }}
+{{- end }}

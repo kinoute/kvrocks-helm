@@ -1,0 +1,43 @@
+{{- $writeService := or (include "kvrocks.haproxyEnabled" .) (not (include "kvrocks.isReplication" .)) }}
+{{- if $writeService }}
+# `helm test`: a write through the write endpoint must be accepted and read back.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "kvrocks.fullname" . }}-test-write
+  labels:
+    {{- include "kvrocks.labels" . | nindent 4 }}
+    app.kubernetes.io/component: test
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  {{- include "kvrocks.imagePullSecrets" . | nindent 2 }}
+  securityContext:
+    {{- toYaml .Values.podSecurityContext | nindent 4 }}
+  containers:
+    - name: test
+      image: {{ include "kvrocks.image" (dict "root" . "image" .Values.image "defaultTag" .Chart.AppVersion) }}
+      imagePullPolicy: {{ .Values.image.pullPolicy }}
+      env:
+        {{- with (include "kvrocks.passwordEnv" .) }}
+        {{- . | nindent 8 }}
+        {{- end }}
+        - name: WRITE_HOST
+          value: {{ include "kvrocks.fullname" . }}
+        - name: WRITE_PORT
+          value: {{ .Values.service.port | quote }}
+      command:
+        - sh
+        - -ec
+        - |
+          export REDISCLI_AUTH="${KVROCKS_PASSWORD:-}"
+          key="helm-test:$(date +%s)"
+          redis-cli -h "$WRITE_HOST" -p "$WRITE_PORT" set "$key" ok | grep -q OK
+          redis-cli -h "$WRITE_HOST" -p "$WRITE_PORT" get "$key" | grep -q ok
+          redis-cli -h "$WRITE_HOST" -p "$WRITE_PORT" del "$key" >/dev/null
+      securityContext:
+        {{- toYaml .Values.containerSecurityContext | nindent 8 }}
+{{- end }}

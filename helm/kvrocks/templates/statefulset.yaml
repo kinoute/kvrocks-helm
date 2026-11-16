@@ -1,0 +1,239 @@
+{{- $replication := include "kvrocks.isReplication" . }}
+{{- $selectorLabels := include "kvrocks.selectorLabels" (dict "root" . "component" "kvrocks") }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "kvrocks.fullname" . }}
+  labels:
+    {{- include "kvrocks.labels" . | nindent 4 }}
+    app.kubernetes.io/component: kvrocks
+spec:
+  replicas: {{ include "kvrocks.replicaCount" . }}
+  serviceName: {{ include "kvrocks.headlessServiceName" . }}
+  # Pods start together. With ordered startup, a full restart would deadlock: a replica
+  # is only ready once it has reached its master, which may be a pod that starts later.
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      {{- $selectorLabels | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "kvrocks.labels" . | nindent 8 }}
+        app.kubernetes.io/component: kvrocks
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        kubectl.kubernetes.io/default-container: kvrocks
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "kvrocks.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      {{- if $replication }}
+      # The pause container reaps orphaned processes. Otherwise they are reparented to
+      # Sentinel, which logs a warning for each: the probes leave one every few seconds.
+      shareProcessNamespace: true
+      {{- end }}
+      {{- include "kvrocks.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      affinity:
+        {{- if .Values.affinity }}
+        {{- toYaml .Values.affinity | nindent 8 }}
+        {{- else }}
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    {{- $selectorLabels | nindent 20 }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if $replication }}
+      # Sidecars: they start before Kvrocks and Kubernetes only stops them once Kvrocks has
+      # exited, so Sentinel is still there when the preStop hook hands the master role over.
+      initContainers:
+        - name: sentinel
+          image: {{ include "kvrocks.image" (dict "root" . "image" .Values.sentinel.image "defaultTag" "") }}
+          imagePullPolicy: {{ .Values.sentinel.image.pullPolicy }}
+          restartPolicy: Always
+          command: ["/scripts/sentinel-start.sh"]
+          env:
+            {{- include "kvrocks.topologyEnv" . | nindent 12 }}
+            - name: SENTINEL_QUORUM
+              value: {{ include "kvrocks.quorum" . | quote }}
+            - name: SENTINEL_DOWN_AFTER_MS
+              value: {{ .Values.sentinel.downAfterMilliseconds | int64 | quote }}
+            - name: SENTINEL_PARALLEL_SYNCS
+              value: {{ .Values.sentinel.parallelSyncs | quote }}
+          ports:
+            - name: sentinel
+              containerPort: {{ .Values.sentinel.port }}
+          livenessProbe:
+            exec:
+              command: ["/scripts/sentinel-probe.sh"]
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            exec:
+              command: ["/scripts/sentinel-probe.sh"]
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          {{- with .Values.sentinel.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/kvrocks
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+        {{- if .Values.fencing.enabled }}
+        - name: fence
+          image: {{ include "kvrocks.image" (dict "root" . "image" .Values.image "defaultTag" .Chart.AppVersion) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          restartPolicy: Always
+          command: ["/scripts/kvrocks-fence.sh"]
+          env:
+            {{- include "kvrocks.topologyEnv" . | nindent 12 }}
+          {{- with .Values.fencing.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+        {{- end }}
+      {{- end }}
+      containers:
+        - name: kvrocks
+          image: {{ include "kvrocks.image" (dict "root" . "image" .Values.image "defaultTag" .Chart.AppVersion) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/scripts/kvrocks-start.sh"]
+          env:
+            {{- include "kvrocks.topologyEnv" . | nindent 12 }}
+          ports:
+            - name: kvrocks
+              containerPort: {{ .Values.port }}
+          startupProbe:
+            exec:
+              command: ["/scripts/kvrocks-probe.sh", "startup"]
+            {{- toYaml .Values.startupProbe | nindent 12 }}
+          livenessProbe:
+            exec:
+              command: ["/scripts/kvrocks-probe.sh", "liveness"]
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            exec:
+              command: ["/scripts/kvrocks-probe.sh", "readiness"]
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/scripts/kvrocks-prestop.sh"]
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/kvrocks
+            - name: config
+              mountPath: /etc/kvrocks
+              readOnly: true
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+        {{- if .Values.metrics.enabled }}
+        - name: metrics
+          image: {{ include "kvrocks.image" (dict "root" . "image" .Values.metrics.image "defaultTag" "") }}
+          imagePullPolicy: {{ .Values.metrics.image.pullPolicy }}
+          env:
+            - name: KVROCKS_ADDR
+              value: redis://localhost:{{ .Values.port }}
+            {{- include "kvrocks.passwordEnv" . | nindent 12 }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: metrics
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          {{- with .Values.metrics.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+        {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "kvrocks.fullname" . }}
+        - name: scripts
+          configMap:
+            name: {{ include "kvrocks.scriptsConfigMapName" . }}
+            defaultMode: 0555
+        # Writable scratch space with a read-only root filesystem: the pid file, Sentinel's dir.
+        - name: tmp
+          emptyDir: {}
+        {{- if not .Values.persistence.enabled }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+  {{- if .Values.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        {{- with .Values.persistence.labels }}
+        labels:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- with .Values.persistence.annotations }}
+        annotations:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+      spec:
+        accessModes:
+          {{- toYaml .Values.persistence.accessModes | nindent 10 }}
+        {{- with .Values.persistence.storageClass }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.size }}
+  {{- end }}

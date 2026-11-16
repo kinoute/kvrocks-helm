@@ -1,0 +1,97 @@
+{{- if and .Values.metrics.enabled .Values.metrics.prometheusRule.enabled }}
+{{- $rule := .Values.metrics.prometheusRule }}
+{{- $name := include "kvrocks.fullname" . }}
+{{- /* The Prometheus Operator labels every series with the namespace and Service it was scraped from. */}}
+{{- $kvrocks := printf "namespace=%q, service=%q" .Release.Namespace (include "kvrocks.headlessServiceName" .) }}
+{{- $haproxy := printf "namespace=%q, service=%q" .Release.Namespace (printf "%s-haproxy-metrics" $name) }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "kvrocks.labels" . | nindent 4 }}
+    {{- with $rule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: {{ $name }}
+      rules:
+        - alert: KvrocksInstanceDown
+          expr: up{ {{- $kvrocks -}} } == 0 or kvrocks_up{ {{- $kvrocks -}} } == 0
+          for: {{ $rule.forMinutes }}m
+          labels:
+            severity: warning
+            {{- with $rule.alertLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: Kvrocks instance {{ `{{ $labels.pod }}` }} is down
+        - alert: KvrocksMasterCountWrong
+          # `or vector(0)`: with no master at all the count is empty, not zero.
+          expr: (count(kvrocks_instance_info{ {{- $kvrocks -}}, role="master"}) or vector(0)) != 1
+          for: {{ $rule.forMinutes }}m
+          labels:
+            severity: critical
+            {{- with $rule.alertLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: {{ $name }} has {{ `{{ $value }}` }} masters instead of 1
+        - alert: KvrocksReplicationBroken
+          expr: kvrocks_master_link_up{ {{- $kvrocks -}} } == 0
+          for: {{ $rule.forMinutes }}m
+          labels:
+            severity: warning
+            {{- with $rule.alertLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: Kvrocks replica {{ `{{ $labels.pod }}` }} lost its master
+        {{- if include "kvrocks.isReplication" . }}
+        - alert: KvrocksReplicasMissing
+          # Counted on the replicas: the master's connected_slaves keeps counting a replica
+          # whose pod is gone until TCP gives up on it.
+          expr: (count(kvrocks_master_link_up{ {{- $kvrocks -}} } == 1) or vector(0)) < {{ sub (int .Values.replicaCount) 1 }}
+          for: {{ $rule.forMinutes }}m
+          labels:
+            severity: warning
+            {{- with $rule.alertLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: {{ $name }} has {{ `{{ $value }}` }} healthy replicas instead of {{ sub (int .Values.replicaCount) 1 }}
+        {{- end }}
+        - alert: KvrocksBackgroundErrors
+          expr: kvrocks_num_background_errors{ {{- $kvrocks -}} } > 0
+          for: {{ $rule.forMinutes }}m
+          labels:
+            severity: critical
+            {{- with $rule.alertLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: RocksDB reports background errors on {{ `{{ $labels.pod }}` }}
+        - alert: KvrocksDiskUsageHigh
+          expr: kvrocks_used_disk_size{ {{- $kvrocks -}} } / kvrocks_disk_capacity_bytes{ {{- $kvrocks -}} } > {{ $rule.diskUsageThreshold }}
+          for: {{ $rule.forMinutes }}m
+          labels:
+            severity: warning
+            {{- with $rule.alertLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: The volume of {{ `{{ $labels.pod }}` }} is {{ `{{ $value | humanizePercentage }}` }} full
+        {{- if include "kvrocks.haproxyEnabled" . }}
+        - alert: KvrocksWriteEndpointDown
+          expr: (max(haproxy_backend_active_servers{ {{- $haproxy -}}, proxy=~"kvrocks_[0-9]+"}) or vector(0)) < 1
+          for: {{ $rule.forMinutes }}m
+          labels:
+            severity: critical
+            {{- with $rule.alertLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: No HAProxy of {{ $name }} can reach a master, writes are refused
+        {{- end }}
+{{- end }}

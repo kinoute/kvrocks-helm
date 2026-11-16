@@ -1,0 +1,272 @@
+# -- Overrides the chart name in resource names.
+nameOverride: ""
+# -- Overrides the full resource name prefix. The write Service takes exactly this name.
+fullnameOverride: ""
+# -- DNS domain of the cluster, used to build the pods' fully qualified names.
+clusterDomain: cluster.local
+# -- Labels added to every resource.
+commonLabels: {} # @schema additionalProperties:true
+
+global:
+  # -- Registry that replaces the registry of every image (e.g. a pull-through cache).
+  imageRegistry: ""
+  # -- Pull secrets added to every pod.
+  imagePullSecrets: []
+
+# -- `replication`: one master and its replicas, with Sentinel failover and an HAProxy
+# write endpoint. `standalone`: a single Kvrocks, no Sentinel, no HAProxy.
+architecture: replication # @schema enum:[replication,standalone]
+
+# -- Number of Kvrocks pods in `replication` mode: one master, the rest replicas.
+# At least 3, so that a majority of Sentinels survives the loss of one pod.
+replicaCount: 3 # @schema minimum:1
+
+image:
+  registry: docker.io
+  repository: apache/kvrocks
+  # -- Defaults to the chart's appVersion.
+  tag: ""
+  # -- Pins the image by digest; takes precedence over the tag.
+  digest: ""
+  pullPolicy: IfNotPresent # @schema enum:[Always,IfNotPresent,Never]
+
+auth:
+  # -- Requires a password on Kvrocks and Sentinel.
+  enabled: true
+  # -- Name of an existing Secret holding the password. Takes precedence over `password`.
+  existingSecret: ""
+  # -- Key of the password in the Secret.
+  secretKey: password
+  # -- Password stored in a Secret created by the chart. Prefer `existingSecret`.
+  # It must not contain whitespace, double quotes or backslashes.
+  password: ""
+
+# -- Port Kvrocks listens on in each pod.
+port: 6379 # @schema minimum:1;maximum:65535
+
+# -- Extra `kvrocks.conf` settings, as `key: value`. Settings the chart owns (bind, port,
+# dir, the password, the replication role...) are rejected.
+config: # @schema additionalProperties:true
+  # Without this, a former master that comes back with unreplicated writes can resume
+  # replication from its sequence number alone and silently diverge from the new master.
+  use-rsid-psync: "yes" # @schema type:[string,boolean]
+
+persistence:
+  enabled: true
+  # -- Leave empty for the cluster's default StorageClass.
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
+  size: 10Gi
+  annotations: {} # @schema additionalProperties:true
+  labels: {} # @schema additionalProperties:true
+
+resources: {} # @schema additionalProperties:true
+#  requests:
+#    cpu: 250m
+#    memory: 1Gi
+#  limits:
+#    memory: 4Gi
+
+podAnnotations: {} # @schema additionalProperties:true
+podLabels: {} # @schema additionalProperties:true
+nodeSelector: {} # @schema additionalProperties:true
+tolerations: []
+topologySpreadConstraints: []
+priorityClassName: ""
+# -- Replaces the default affinity, which prefers one Kvrocks pod per node.
+affinity: {} # @schema additionalProperties:true
+
+# -- Seconds a pod gets to stop: the master handover, then Kvrocks flushing its WAL.
+terminationGracePeriodSeconds: 120
+
+podSecurityContext: # @schema additionalProperties:true
+  runAsNonRoot: true
+  runAsUser: 999
+  runAsGroup: 999
+  fsGroup: 999
+  fsGroupChangePolicy: OnRootMismatch
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext: # @schema additionalProperties:true
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+# -- Kvrocks only listens once its database is open, which takes time on a large volume:
+# the startup probe allows `failureThreshold * periodSeconds` (20 minutes by default).
+startupProbe: # @schema additionalProperties:true
+  periodSeconds: 5
+  timeoutSeconds: 5
+  failureThreshold: 240
+
+livenessProbe: # @schema additionalProperties:true
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 6
+
+# -- A replica is ready once it follows the master and has finished syncing.
+readinessProbe: # @schema additionalProperties:true
+  periodSeconds: 5
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {} # @schema additionalProperties:true
+
+# -- The write endpoint: HAProxy in `replication` mode, the single pod in `standalone` mode.
+service:
+  type: ClusterIP # @schema enum:[ClusterIP,NodePort,LoadBalancer]
+  port: 6379 # @schema minimum:1;maximum:65535
+  annotations: {} # @schema additionalProperties:true
+
+# -- A second Service that spreads reads over every ready pod, replicas included.
+# Replication is asynchronous: a read may return slightly stale data.
+readService:
+  enabled: true
+  type: ClusterIP # @schema enum:[ClusterIP,NodePort,LoadBalancer]
+  port: 6379 # @schema minimum:1;maximum:65535
+  annotations: {} # @schema additionalProperties:true
+
+sentinel:
+  image:
+    registry: docker.io
+    repository: valkey/valkey
+    tag: 9.0.6-alpine
+    digest: ""
+    pullPolicy: IfNotPresent # @schema enum:[Always,IfNotPresent,Never]
+  port: 26379 # @schema minimum:1;maximum:65535
+  # -- Name Sentinel knows the master by; Sentinel-aware clients need it.
+  masterName: kvrocks
+  # -- Sentinels that must agree a master is down. Defaults to a majority of the pods.
+  quorum: "" # @schema type:[string,integer]
+  # -- Milliseconds a master must be unreachable before Sentinel declares it down.
+  # A crash failover takes a little longer than this.
+  downAfterMilliseconds: 10000
+  # -- Milliseconds before Sentinel retries a failover that did not complete.
+  failoverTimeoutMilliseconds: 60000
+  # -- Replicas re-synced at the same time after a failover.
+  parallelSyncs: 1
+  resources: {} # @schema additionalProperties:true
+
+switchover:
+  # -- Milliseconds client writes are paused while the master hands its role over
+  # (rolling update, drain). Must be lower than `sentinel.downAfterMilliseconds`,
+  # or Sentinel declares the paused master down.
+  pauseMilliseconds: 5000 # @schema minimum:4000
+
+fencing:
+  # -- Pauses the writes of a master that a majority of Sentinels no longer confirms, as
+  # when it is cut off from its peers. Kvrocks has no min-replicas-to-write: without
+  # fencing, connections already open to such a master keep writing to it until the
+  # partition heals, and all those writes are lost. The cost: a healthy master also stops
+  # taking writes when two Sentinels out of three are down, as HAProxy already does.
+  enabled: true
+  resources: {} # @schema additionalProperties:true
+
+haproxy:
+  # -- Deploys HAProxy as the write endpoint. Without it, clients must be Sentinel-aware.
+  enabled: true
+  image:
+    registry: docker.io
+    repository: haproxy
+    tag: 3.2.25-alpine
+    digest: ""
+    pullPolicy: IfNotPresent # @schema enum:[Always,IfNotPresent,Never]
+  replicaCount: 2 # @schema minimum:1
+  maxConnections: 10000
+  # -- How long HAProxy keeps the last known address of a pod when cluster DNS stops answering.
+  dnsOutageTolerance: 1h
+  # -- Port of the health endpoints (`/livez`, `/readyz`) and of `/metrics`.
+  healthPort: 8888 # @schema minimum:1;maximum:65535
+  check:
+    # -- How often HAProxy asks each Sentinel for the master and each Kvrocks for its role.
+    interval: 1s
+    # -- Failed role checks in a row before HAProxy cuts the connections to a Kvrocks.
+    # Higher than 1 so that one slow answer from a busy master does not drop every client.
+    fall: 3
+  livenessProbe: # @schema additionalProperties:true
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+  # -- HAProxy is ready while it can reach the master Sentinel agrees on.
+  readinessProbe: # @schema additionalProperties:true
+    periodSeconds: 2
+    timeoutSeconds: 2
+    failureThreshold: 2
+  timeouts:
+    connect: 4s
+    check: 2s
+    # -- Idle time after which a client connection is closed. Clients that keep idle
+    # pooled connections reconnect transparently.
+    client: 1d
+    server: 1d
+  resources: {} # @schema additionalProperties:true
+  podAnnotations: {} # @schema additionalProperties:true
+  podLabels: {} # @schema additionalProperties:true
+  nodeSelector: {} # @schema additionalProperties:true
+  tolerations: []
+  topologySpreadConstraints: []
+  priorityClassName: ""
+  # -- Replaces the default affinity, which prefers one HAProxy pod per node.
+  affinity: {} # @schema additionalProperties:true
+  terminationGracePeriodSeconds: 30
+  podSecurityContext: # @schema additionalProperties:true
+    runAsNonRoot: true
+    runAsUser: 99
+    runAsGroup: 99
+    seccompProfile:
+      type: RuntimeDefault
+  podDisruptionBudget:
+    enabled: true
+    maxUnavailable: 1
+
+metrics:
+  # -- Runs kvrocks_exporter next to each Kvrocks, and exposes HAProxy's own metrics.
+  enabled: true
+  image:
+    registry: docker.io
+    repository: kvrocks/kvrocks-exporter
+    tag: 1.0.11
+    digest: ""
+    pullPolicy: IfNotPresent # @schema enum:[Always,IfNotPresent,Never]
+  port: 9121 # @schema minimum:1;maximum:65535
+  resources: {} # @schema additionalProperties:true
+  serviceMonitor:
+    # -- Requires the Prometheus Operator CRDs.
+    enabled: false
+    # -- Labels your Prometheus selects ServiceMonitors by (e.g. `release: prometheus`).
+    labels: {} # @schema additionalProperties:true
+    interval: 30s
+    scrapeTimeout: 10s
+    relabelings: []
+    metricRelabelings: []
+  prometheusRule:
+    # -- Requires the Prometheus Operator CRDs.
+    enabled: false
+    labels: {} # @schema additionalProperties:true
+    # -- Labels added to every alert.
+    alertLabels: {} # @schema additionalProperties:true
+    # -- Minutes a condition must hold before its alert fires.
+    forMinutes: 2
+    # -- Disk usage ratio above which the disk alert fires.
+    diskUsageThreshold: 0.8 # @schema minimum:0;maximum:1
+
+networkPolicy:
+  # -- Restricts ingress to the Kvrocks and HAProxy pods.
+  enabled: false
+  # -- Peers allowed to reach the write endpoint and the read Service, as
+  # NetworkPolicy `from` entries. Empty allows every pod of the cluster.
+  clientsFrom: []
+  # -- Peers allowed to scrape the metrics, as NetworkPolicy `from` entries.
+  # Empty allows every pod of the cluster.
+  metricsFrom: []

@@ -1,0 +1,22 @@
+{{- if and .Values.readService.enabled (include "kvrocks.isReplication" .) }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "kvrocks.fullname" . }}-read
+  labels:
+    {{- include "kvrocks.labels" . | nindent 4 }}
+    app.kubernetes.io/component: kvrocks
+  {{- with .Values.readService.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.readService.type }}
+  ports:
+    - name: kvrocks
+      port: {{ .Values.readService.port }}
+      targetPort: kvrocks
+  # Every ready pod: the master, and the replicas that have caught up with it.
+  selector:
+    {{- include "kvrocks.selectorLabels" (dict "root" . "component" "kvrocks") | nindent 4 }}
+{{- end }}

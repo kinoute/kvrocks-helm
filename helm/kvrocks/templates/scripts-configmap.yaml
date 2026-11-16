@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kvrocks.scriptsConfigMapName" . }}
+  labels:
+    {{- include "kvrocks.labels" . | nindent 4 }}
+# The name changes with the content, so the content never has to.
+immutable: true
+data:
+  {{- include "kvrocks.scriptsData" . | trim | nindent 2 }}

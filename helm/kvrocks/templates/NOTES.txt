@@ -1,0 +1,29 @@
+{{- $name := include "kvrocks.fullname" . }}
+{{- $domain := printf "%s.svc.%s" .Release.Namespace .Values.clusterDomain }}
+{{- if include "kvrocks.isReplication" . }}
+Kvrocks runs with 1 master and {{ sub (int .Values.replicaCount) 1 }} replicas.
+
+{{- if include "kvrocks.haproxyEnabled" . }}
+
+Writes (always the master):  {{ $name }}.{{ $domain }}:{{ .Values.service.port }}
+{{- else }}
+
+HAProxy is disabled: there is no write endpoint, clients must ask Sentinel for the master.
+{{- end }}
+{{- if .Values.readService.enabled }}
+Reads (any ready pod):       {{ $name }}-read.{{ $domain }}:{{ .Values.readService.port }}
+{{- end }}
+Sentinel (master name "{{ .Values.sentinel.masterName }}"): {{ include "kvrocks.headlessServiceName" . }}.{{ $domain }}:{{ .Values.sentinel.port }}
+
+To move the master before maintenance, without losing a write:
+
+  kubectl -n {{ .Release.Namespace }} exec <master pod> -c kvrocks -- /scripts/kvrocks-switchover.sh
+
+Do not use a plain SENTINEL FAILOVER for that: the old master keeps accepting writes for
+about a second after the new one is promoted, and those writes are lost.
+
+Replication is asynchronous. If the master crashes, the last writes it acknowledged
+but had not sent to a replica yet are lost.
+{{- else }}
+Kvrocks runs as a single instance:  {{ $name }}.{{ $domain }}:{{ .Values.service.port }}
+{{- end }}
