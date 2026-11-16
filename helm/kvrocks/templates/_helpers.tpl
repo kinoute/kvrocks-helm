@@ -158,6 +158,9 @@ bind port dir pidfile log-dir daemonize cluster-enabled requirepass masterauth s
 {{- if and .Values.auth.enabled (not .Values.auth.existingSecret) (not .Values.auth.password) }}
 {{- fail "auth is enabled: set auth.existingSecret or auth.password" }}
 {{- end }}
+{{- if regexMatch "[\\s\"'\\\\]" (toString .Values.auth.password) }}
+{{- fail "auth.password must not contain whitespace, quotes or backslashes: HAProxy sends it in its health checks" }}
+{{- end }}
 {{- range $key := splitList " " (include "kvrocks.reservedConfigKeys" .) }}
 {{- if hasKey $.Values.config $key }}
 {{- fail (printf "config.%s is managed by the chart and cannot be overridden" $key) }}

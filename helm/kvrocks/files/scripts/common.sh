@@ -61,6 +61,17 @@ kv_info_field() { # $1: host, $2: field of INFO replication
     awk -F: -v field="$2" '$1 == field { print $2 }'
 }
 
+# The role of a Kvrocks: master, slave, or unknown when it does not answer. A script that
+# took "no answer" for "not master" would skip the step that keeps data safe.
+kv_role() { # $1: host
+  local role
+  role=$(kv_info_field "$1" role)
+  case "$role" in
+    master | slave) printf '%s\n' "$role" ;;
+    *) printf 'unknown\n' ;;
+  esac
+}
+
 # A view is what a Sentinel believes: "<config epoch> <master>". Sentinel raises the epoch
 # at every failover, so between two views the higher epoch is the more recent truth.
 view_epoch() { # $1: view
@@ -79,12 +90,24 @@ valid_view() { # $1: view, possibly empty
   fi
 }
 
+sentinel_epoch() { # $1: Sentinel host
+  sentinel_cli "$1" sentinel master "$SENTINEL_MASTER_NAME" | tr -d '\r' | paste - - |
+    awk '$1 == "config-epoch" { print $2 + 0 }'
+}
+
+# The master comes from get-master-addr-by-name, not from the ip of SENTINEL MASTER: during
+# a failover the leader raises the epoch when the replica is promoted, but only changes that
+# ip at the very end. The epoch is read before and after, so that a failover completing in
+# between cannot pair an old master with a new epoch.
 sentinel_view() { # $1: Sentinel host
-  local view
-  view=$(sentinel_cli "$1" sentinel master "$SENTINEL_MASTER_NAME" | tr -d '\r' | paste - - |
-    awk '$1 == "ip" { master = $2 } $1 == "config-epoch" { epoch = $2 }
-         END { if (master != "") print epoch + 0, master }')
-  valid_view "$view"
+  local before master after
+  before=$(sentinel_epoch "$1")
+  master=$(sentinel_cli "$1" sentinel get-master-addr-by-name "$SENTINEL_MASTER_NAME" |
+    head -n 1 | tr -d '\r')
+  after=$(sentinel_epoch "$1")
+  if [ -n "$before" ] && [ "$before" = "$after" ]; then
+    valid_view "$before $master"
+  fi
 }
 
 # The most recent view among the peer Sentinels. Peers only: the local Sentinel may be
@@ -137,7 +160,11 @@ SENTINEL_CANDIDATE_PING_MS=5000
 # answering pings, priority above 0. After a restart, a replica stays out for a while:
 # Sentinel needs a DNS answer with the new address of its pod to reach it again.
 promotable_replicas() { # $1: Sentinel host
-  sentinel_cli "$1" sentinel replicas "$SENTINEL_MASTER_NAME" | tr -d '\r' | paste - - |
+  sentinel_cli "$1" sentinel replicas "$SENTINEL_MASTER_NAME" | promotable_replicas_from_reply
+}
+
+promotable_replicas_from_reply() { # reads the reply of SENTINEL REPLICAS
+  tr -d '\r' | paste - - |
     awk -F '\t' -v max_ping_ms="$SENTINEL_CANDIDATE_PING_MS" '
       function emit() {
         if (host != "" && flags !~ /s_down|o_down|disconnected/ && priority != 0 && ping <= max_ping_ms)

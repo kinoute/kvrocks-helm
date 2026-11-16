@@ -51,7 +51,16 @@ spec:
         {{- if .Values.affinity }}
         {{- toYaml .Values.affinity | nindent 8 }}
         {{- else }}
+        # Two Kvrocks pods on one node: losing that node loses the Sentinel majority, and
+        # with it any failover. Hence one pod per node unless podAntiAffinity says soft.
         podAntiAffinity:
+          {{- if eq .Values.podAntiAffinity "hard" }}
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  {{- $selectorLabels | nindent 18 }}
+          {{- else }}
           preferredDuringSchedulingIgnoredDuringExecution:
             - weight: 100
               podAffinityTerm:
@@ -59,6 +68,7 @@ spec:
                 labelSelector:
                   matchLabels:
                     {{- $selectorLabels | nindent 20 }}
+          {{- end }}
         {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
@@ -92,9 +102,12 @@ spec:
           ports:
             - name: sentinel
               containerPort: {{ .Values.sentinel.port }}
+          # A TCP check: during a cluster DNS outage, Sentinel resolves hostnames on the spot
+          # and stops answering for seconds at a time. Restarting it then would only make
+          # it forget what it was doing.
           livenessProbe:
-            exec:
-              command: ["/scripts/sentinel-probe.sh"]
+            tcpSocket:
+              port: {{ .Values.sentinel.port }}
             {{- toYaml .Values.livenessProbe | nindent 12 }}
           readinessProbe:
             exec:

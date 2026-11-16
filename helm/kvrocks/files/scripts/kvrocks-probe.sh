@@ -12,30 +12,59 @@ answers() {
   [ -n "$(kv_cli localhost ping)" ]
 }
 
+# The probe must answer well within its timeoutSeconds (5 s by default).
+PROBE_CLI_TIMEOUT_SECONDS=1
 # A Sentinel that does not answer within this time counts as one that cannot promote us.
 SENTINEL_PROBE_TIMEOUT_SECONDS=0.5
 
-# How many Sentinels could promote this replica right now.
-promotable_by() {
+# One line per Sentinel that answers: "yes" if it could promote this replica, "no" if not.
+sentinel_opinions() {
   local host
   for host in localhost $(peer_fqdns); do
     (
       CLI_TIMEOUT_SECONDS=$SENTINEL_PROBE_TIMEOUT_SECONDS
-      promotable_replicas "$host"
+      reply=$(sentinel_cli "$host" sentinel replicas "$SENTINEL_MASTER_NAME") || exit 0
+      [ -n "$reply" ] || exit 0
+      if printf '%s\n' "$reply" | promotable_replicas_from_reply | grep -q -x -F "$(self_fqdn)"; then
+        echo yes
+      else
+        echo no
+      fi
     ) &
-  done | grep -c -x -F "$(self_fqdn)" || true
+  done | sort
 }
 
-# A replica is ready once it follows its master, has finished syncing, and a majority of
-# Sentinels could promote it. The rolling update waits for readiness, so it never stops the
-# next pod, the master maybe, while this one is still catching up or out of Sentinel's reach.
+# A majority of Sentinels must be able to promote this replica. If fewer than a majority
+# answer at all, as during a cluster DNS outage, when Sentinel stalls on name lookups, every
+# one that answers must be able to; if none answers, the replication link alone decides.
+promotable_enough() {
+  local opinions answered promotable
+  opinions=$(sentinel_opinions)
+  answered=$(printf '%s\n' "$opinions" | grep -c -E '^(yes|no)$' || true)
+  promotable=$(printf '%s\n' "$opinions" | grep -c -x yes || true)
+  [ "$promotable" -ge "$SENTINEL_MAJORITY" ] && return 0
+  [ "$answered" -lt "$SENTINEL_MAJORITY" ] && [ "$promotable" -eq "$answered" ]
+}
+
+field() { # $1: INFO replication output, $2: field
+  printf '%s\n' "$1" | awk -F: -v field="$2" '$1 == field { print $2 }'
+}
+
+# A replica is ready once it follows its master, has finished syncing, and Sentinel could
+# promote it. The rolling update waits for readiness, so it never stops the next pod, the
+# master maybe, while this one is still catching up or out of Sentinel's reach.
 is_ready() {
-  case "$(kv_info_field localhost role)" in
+  local info
+  info=$(
+    CLI_TIMEOUT_SECONDS=$PROBE_CLI_TIMEOUT_SECONDS
+    kv_cli localhost info replication | tr -d '\r'
+  )
+  case "$(field "$info" role)" in
     master) return 0 ;;
     slave)
-      [ "$(kv_info_field localhost master_link_status)" = "up" ] &&
-        [ "$(kv_info_field localhost master_sync_in_progress)" = "0" ] &&
-        { [ "$KVROCKS_ARCHITECTURE" != "replication" ] || [ "$(promotable_by)" -ge "$SENTINEL_MAJORITY" ]; }
+      [ "$(field "$info" master_link_status)" = "up" ] &&
+        [ "$(field "$info" master_sync_in_progress)" = "0" ] &&
+        { [ "$KVROCKS_ARCHITECTURE" != "replication" ] || promotable_enough; }
       ;;
     *) return 1 ;;
   esac

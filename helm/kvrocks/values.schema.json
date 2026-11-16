@@ -486,6 +486,13 @@
       "properties": {},
       "type": "object"
     },
+    "podAntiAffinity": {
+      "enum": [
+        "hard",
+        "soft"
+      ],
+      "type": "string"
+    },
     "podDisruptionBudget": {
       "additionalProperties": false,
       "properties": {

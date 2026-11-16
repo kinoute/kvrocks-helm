@@ -25,6 +25,7 @@ PROBE_TIMEOUT_SECONDS=0.5
 REQUEST_MARGIN_MS=2500
 # Sentinel answers a failover request at once, unless something blocks it for a moment.
 FAILOVER_REQUEST_TIMEOUT_SECONDS=1
+DEMOTE_ATTEMPTS=30
 
 stopping=no
 if [ "${1:-}" = "--stopping" ]; then
@@ -114,7 +115,11 @@ wait_for_new_master() { # prints the new master
   while [ "$(now_ms)" -lt "$deadline" ]; do
     pause_writes || true
     for host in localhost $(peer_fqdns); do
-      master=$(sentinel_master "$host")
+      # Short timeouts: an unreachable Sentinel must not outlast the write pause.
+      master=$(
+        CLI_TIMEOUT_SECONDS=$PROBE_TIMEOUT_SECONDS
+        sentinel_master "$host"
+      )
       if [ -n "$master" ] && [ "$master" != "$(self_fqdn)" ]; then
         printf '%s\n' "$master"
         return 0
@@ -125,10 +130,18 @@ wait_for_new_master() { # prints the new master
   return 1
 }
 
+# Fails if this pod is still master after a few seconds. Writes then stay paused until the
+# pause expires; by then the fencing sidecar holds them, as the Sentinels name another pod.
 demote_to() { # $1: new master
-  until [ "$(kv_info_field localhost role)" = "slave" ]; do
+  local attempt=0
+  until [ "$(kv_role localhost)" = "slave" ]; do
+    if [ "$attempt" -ge "$DEMOTE_ATTEMPTS" ]; then
+      return 1
+    fi
     pause_writes || true
     kv_cli localhost slaveof "$1" "$KVROCKS_PORT" >/dev/null || true
+    attempt=$((attempt + 1))
+    sleep "$POLL_SECONDS"
   done
   # Clients blocked by the pause must reconnect to the new master, not write here.
   kv_cli localhost client kill type normal >/dev/null || true
@@ -168,10 +181,16 @@ give_up() { # $1: why. The EXIT trap releases the writes, unless the pod is stop
   exit 1
 }
 
-if [ "$(kv_info_field localhost role)" != "master" ]; then
-  log "not the master, nothing to hand over"
-  exit 0
-fi
+case "$(kv_role localhost)" in
+  slave)
+    log "not the master, nothing to hand over"
+    exit 0
+    ;;
+  unknown)
+    log "the local Kvrocks does not answer, no handover"
+    exit 1
+    ;;
+esac
 
 if ! sentinel=$(pick_sentinel); then
   log "no Sentinel names this pod as master, nothing to hand over"
@@ -225,6 +244,9 @@ if ! new_master=$(wait_for_new_master); then
   exit 1
 fi
 
-demote_to "$new_master"
+if ! demote_to "$new_master"; then
+  log "ERROR: $new_master is master but this pod did not step down; its writes stay paused"
+  exit 1
+fi
 resume_writes
 log "handed the master role over to $new_master at offset $target_offset"

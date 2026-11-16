@@ -16,10 +16,11 @@ fail() {
 }
 
 # The password travels through an inline Redis command in the HAProxy health checks,
-# where whitespace splits arguments, and through quoted values in both config files.
+# where whitespace splits arguments and quotes open a string, and through quoted values in
+# both config files.
 validate_password() {
   case "${KVROCKS_PASSWORD:-}" in
-    *[[:space:]\"\\]*) fail "the password must not contain whitespace, double quotes or backslashes" ;;
+    *[[:space:]\"\'\\]*) fail "the password must not contain whitespace, quotes or backslashes" ;;
   esac
 }
 

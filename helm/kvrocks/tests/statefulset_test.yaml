@@ -288,12 +288,14 @@ tests:
           path: spec.template.spec.containers[?(@.name == "kvrocks")].lifecycle.preStop.exec.command
           value: ["/scripts/kvrocks-prestop.sh"]
 
-  - it: probes sentinel with the sentinel probe script
+  - it: checks sentinel liveness over TCP, as name lookups can stall its answers
     template: statefulset.yaml
+    set:
+      sentinel.port: 26380
     asserts:
       - equal:
-          path: spec.template.spec.initContainers[?(@.name == "sentinel")].livenessProbe.exec.command
-          value: ["/scripts/sentinel-probe.sh"]
+          path: spec.template.spec.initContainers[?(@.name == "sentinel")].livenessProbe.tcpSocket.port
+          value: 26380
       - equal:
           path: spec.template.spec.initContainers[?(@.name == "sentinel")].readinessProbe.exec.command
           value: ["/scripts/sentinel-probe.sh"]
@@ -473,8 +475,25 @@ tests:
 
   # --- Affinity ---
 
-  - it: prefers one kvrocks pod per node by default
+  - it: requires one kvrocks pod per node by default
     template: statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.affinity
+          value:
+            podAntiAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - topologyKey: kubernetes.io/hostname
+                  labelSelector:
+                    matchLabels:
+                      app.kubernetes.io/name: kvrocks
+                      app.kubernetes.io/instance: db
+                      app.kubernetes.io/component: kvrocks
+
+  - it: only prefers one kvrocks pod per node when podAntiAffinity is soft
+    template: statefulset.yaml
+    set:
+      podAntiAffinity: soft
     asserts:
       - equal:
           path: spec.template.spec.affinity

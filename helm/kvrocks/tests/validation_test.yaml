@@ -231,3 +231,23 @@ tests:
       image.tag: nightly
     asserts:
       - notFailedTemplate: {}
+
+  - it: refuses a password with a quote, which HAProxy would cut in its health checks
+    set:
+      auth.password: "it's"
+    asserts:
+      - failedTemplate:
+          errorMessage: "auth.password must not contain whitespace, quotes or backslashes: HAProxy sends it in its health checks"
+
+  - it: refuses a password with a space
+    set:
+      auth.password: "two words"
+    asserts:
+      - failedTemplate:
+          errorMessage: "auth.password must not contain whitespace, quotes or backslashes: HAProxy sends it in its health checks"
+
+  - it: accepts a password with symbols
+    set:
+      auth.password: "p#ss%w&rd!"
+    asserts:
+      - notFailedTemplate: {}

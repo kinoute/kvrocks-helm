@@ -74,7 +74,11 @@ nodeSelector: {} # @schema additionalProperties:true
 tolerations: []
 topologySpreadConstraints: []
 priorityClassName: ""
-# -- Replaces the default affinity, which prefers one Kvrocks pod per node.
+# -- `hard`: one Kvrocks pod per node, or the pod stays Pending. Two pods on one node lose
+# the Sentinel majority, and any failover, together with that node. `soft` only prefers it,
+# for clusters with fewer nodes than pods. Ignored when `affinity` is set.
+podAntiAffinity: hard # @schema enum:[hard,soft]
+# -- Replaces the default affinity entirely.
 affinity: {} # @schema additionalProperties:true
 
 # -- Seconds a pod gets to stop: the master handover, then Kvrocks flushing its WAL.
