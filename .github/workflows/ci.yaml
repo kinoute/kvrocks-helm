@@ -5,6 +5,8 @@ on:
     branches: [main]
     tags: ["v*"]
   pull_request:
+  # Runs every scenario on any branch, without a Kind cluster on a laptop.
+  workflow_dispatch:
 
 permissions:
   contents: read
