@@ -219,6 +219,9 @@ describe_cluster() {
   done
   # Cluster DNS and the pod network, which restarted nodes have to bring back.
   kubectl -n kube-system get pods -o wide 2>&1 | grep -E 'coredns|kindnet|kube-proxy' | cut -c1-130
+  for pod in $(kubectl -n kube-system get pods -o jsonpath='{range .items[?(@.status.containerStatuses[0].ready==false)]}{.metadata.name} {end}' 2>/dev/null); do
+    kubectl -n kube-system logs "$pod" --previous --tail=6 2>&1 | sed "s|^|    $pod (previous): |" | cut -c1-200
+  done
   k get events --sort-by=.lastTimestamp 2>&1 | grep -E 'Unhealthy|BackOff|Killing|Failed' | tail -12 | cut -c1-200
   # A handover that gave up leaves its reason in a FailedPreStopHook event.
   k get events --field-selector reason=FailedPreStopHook -o custom-columns=POD:.involvedObject.name,MESSAGE:.message --no-headers 2>&1 | tail -5

@@ -332,9 +332,14 @@ scenario_master_volume_loss() {
   sleep "$LOAD_AFTER_FAILURE_SECONDS"
   wait_healthy
   # Without this, a pod that came back after the failover would pass without proving anything.
+  # Only Kind provisions a volume faster than Sentinel fails over: on real storage, the pod
+  # starts after the failover, as a replica, and there is nothing to guard against.
   startup_log=$(k logs "$(pod_name "$master")" -c kvrocks)
-  grep -q 'empty volume: waiting' <<<"$startup_log" ||
-    fail "master_volume_loss: the pod came back after the failover, the guard was not exercised"
+  if ! grep -q 'empty volume: waiting' <<<"$startup_log"; then
+    [ -n "$E2E_CONTEXT" ] ||
+      fail "master_volume_loss: the pod came back after the failover, the guard was not exercised"
+    printf '    master_volume_loss: the new volume came after the failover, nothing to guard\n'
+  fi
   report=$(finish_load mastervolume)
   assert_report master_volume_loss "$report" "$MAX_LOSS_ON_CRASH" "$MAX_CRASH_WRITE_GAP_SECONDS"
 }
