@@ -317,6 +317,33 @@ writes_in_seconds() { # $1: JSON report, $2: seconds
   jq -r --argjson seconds "$2" '(.acked / .duration_seconds * $seconds) | ceil' <<<"$1"
 }
 
+# Kind nodes are containers on this Docker network, created with a subnet of our own so that
+# a node can get its address back: Docker hands a restarted container the lowest free
+# address, and a node that comes back under another one confuses its kubelet and its pods.
+NODE_NETWORK=kvrocks-e2e
+NODE_SUBNET=172.31.250.0/24
+declare -A NODE_ADDRESSES=()
+
+kill_nodes() { # node names
+  local node
+  for node in "$@"; do
+    NODE_ADDRESSES[$node]=$(docker inspect -f "{{(index .NetworkSettings.Networks \"$NODE_NETWORK\").IPAddress}}" "$node")
+  done
+  docker kill "$@" >/dev/null
+}
+
+start_nodes() { # node names
+  local node address
+  for node in "$@"; do
+    address=${NODE_ADDRESSES[$node]:-}
+    if [ -n "$address" ]; then
+      docker network disconnect "$NODE_NETWORK" "$node" >/dev/null 2>&1 || true
+      docker network connect --ip "$address" "$NODE_NETWORK" "$node"
+    fi
+    docker start "$node" >/dev/null
+  done
+}
+
 worker_nodes() {
   kubectl get nodes -l '!node-role.kubernetes.io/control-plane' -o name | sed 's|node/||'
 }

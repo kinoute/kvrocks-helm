@@ -43,7 +43,11 @@ ensure_cluster() {
   if kind get clusters 2>/dev/null | grep -q -x "$CLUSTER_NAME"; then
     kind export kubeconfig --name "$CLUSTER_NAME" --kubeconfig "$KUBECONFIG" >/dev/null 2>&1
   else
-    kind create cluster --name "$CLUSTER_NAME" --config "$E2E_DIR/kind.yaml" --kubeconfig "$KUBECONFIG"
+    docker network inspect "$NODE_NETWORK" >/dev/null 2>&1 ||
+      docker network create --driver bridge --subnet "$NODE_SUBNET" \
+        --opt com.docker.network.bridge.enable_ip_masquerade=true "$NODE_NETWORK" >/dev/null
+    KIND_EXPERIMENTAL_DOCKER_NETWORK=$NODE_NETWORK \
+      kind create cluster --name "$CLUSTER_NAME" --config "$E2E_DIR/kind.yaml" --kubeconfig "$KUBECONFIG"
   fi
   kubectl wait --for=condition=Ready nodes --all --timeout=180s >/dev/null
 }
@@ -63,6 +67,7 @@ cleanup() {
   restore_cluster_dns
   if [ -z "${KEEP_CLUSTER:-}" ]; then
     kind delete cluster --name "$CLUSTER_NAME" >/dev/null 2>&1 || true
+    docker network rm "$NODE_NETWORK" >/dev/null 2>&1 || true
   fi
 }
 trap cleanup EXIT

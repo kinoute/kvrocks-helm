@@ -86,14 +86,14 @@ scenario_switchover_with_dead_replica() {
   dead=$(((master + 1) % REPLICAS))
   node=$(node_of "$dead")
   start_load deadreplica
-  docker kill "$node" >/dev/null
+  kill_nodes "$node"
   # Long enough for Sentinel to rule the dead replica out as a candidate.
   sleep "$SENTINEL_DOWN_AFTER_SECONDS"
   sleep "$LOAD_AFTER_FAILURE_SECONDS"
   k exec "$(pod_name "$master")" -c kvrocks -- /scripts/kvrocks-switchover.sh ||
     fail "switchover_with_dead_replica: the handover script failed"
   sleep "$LOAD_AFTER_FAILURE_SECONDS"
-  docker start "$node" >/dev/null
+  start_nodes "$node"
   wait_healthy
   [ "$(current_master)" != "$master" ] || fail "switchover_with_dead_replica: the master did not change"
   report=$(finish_load deadreplica)
@@ -230,10 +230,10 @@ scenario_master_node_failure() {
   master=$(current_master)
   node=$(node_of "$master")
   start_load nodefail
-  docker kill "$node" >/dev/null
+  kill_nodes "$node"
   new_master=$(wait_for_new_master "$master")
   sleep "$LOAD_AFTER_FAILURE_SECONDS"
-  docker start "$node" >/dev/null
+  start_nodes "$node"
   wait_healthy
   [ "$(current_master)" = "$new_master" ] || fail "master_node_failure: the master changed again"
   report=$(finish_load nodefail)
@@ -339,9 +339,9 @@ scenario_full_outage() {
   assert_keys_everywhere full_outage_before outage "$OUTAGE_KEYS"
 
   # shellcheck disable=SC2086  # one argument per node
-  docker kill $nodes >/dev/null
+  kill_nodes $nodes
   # shellcheck disable=SC2086
-  docker start $nodes >/dev/null
+  start_nodes $nodes
   wait_healthy
   assert_keys_everywhere full_outage_after outage "$OUTAGE_KEYS"
 }
@@ -353,15 +353,15 @@ scenario_stale_master_starts_first() {
   local old_master old_node new_master named
   old_master=$(current_master)
   old_node=$(node_of "$old_master")
-  docker kill "$old_node" >/dev/null
+  kill_nodes "$old_node"
   new_master=$(wait_for_new_master "$old_master")
   write_keys afterfailover "$OUTAGE_KEYS" "$new_master"
   # Lets the remaining replica receive them: only replicated data survives an outage.
   sleep "$LOAD_AFTER_FAILURE_SECONDS"
 
   # shellcheck disable=SC2046  # one argument per node
-  docker kill $(worker_nodes | grep -v -x "$old_node") >/dev/null
-  docker start "$old_node" >/dev/null
+  kill_nodes $(worker_nodes | grep -v -x "$old_node")
+  start_nodes "$old_node"
   wait_until_pod_answers "$old_master"
   # The scenario only means something if the outdated Sentinel is there to mislead the others.
   # It restarts with its pod, possibly after Kvrocks already answers: give it some time.
@@ -369,7 +369,7 @@ scenario_stale_master_starts_first() {
   [ "$named" = "$(pod_fqdn "$old_master")" ] ||
     fail "stale_master_starts_first: the outdated Sentinel names [$named], not the old master"
   # shellcheck disable=SC2046
-  docker start $(worker_nodes) >/dev/null
+  start_nodes $(worker_nodes)
   wait_healthy
   [ "$(current_master)" != "$old_master" ] ||
     fail "stale_master_starts_first: the pod that missed the failover is master again"
@@ -387,17 +387,17 @@ scenario_empty_first_pod_after_outage() {
 
   first_node=$(node_of 0)
   # shellcheck disable=SC2046  # one argument per node
-  docker kill $(worker_nodes) >/dev/null
+  kill_nodes $(worker_nodes)
   k delete pvc "data-$(pod_name 0)" --wait=false >/dev/null
   k delete pod "$(pod_name 0)" --force --grace-period=0 >/dev/null 2>&1
-  docker start "$first_node" >/dev/null
+  start_nodes "$first_node"
   # A head start for the empty pod, alone, before any peer can tell it who holds the data.
   sleep "$EMPTY_POD_HEAD_START_SECONDS"
   startup_log=$(k logs "$(pod_name 0)" -c kvrocks)
   grep -q 'empty volume: waiting' <<<"$startup_log" ||
     fail "empty_first_pod_after_outage: the empty pod is not holding back"
   # shellcheck disable=SC2046
-  docker start $(worker_nodes) >/dev/null
+  start_nodes $(worker_nodes)
   wait_healthy
   assert_keys_everywhere empty_first_pod_after_outage beforeloss "$OUTAGE_KEYS"
 }
