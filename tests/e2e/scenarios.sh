@@ -25,6 +25,8 @@ MAX_DEMOTION_SECONDS=5
 # About one second of writes: the time Sentinel needs between promoting and switching.
 MAX_LOSS_ON_PLAIN_FAILOVER=${MAX_LOSS_ON_PLAIN_FAILOVER:-30000}
 # Size of the data large_dataset writes, and how long it may take per GiB, generously.
+# How long node_upgrade keeps each node out, as if it were being upgraded.
+NODE_UPGRADE_SECONDS=${NODE_UPGRADE_SECONDS:-30}
 # The oldest Kvrocks the chart supports in replication mode, upgraded by kvrocks_upgrade.
 KVROCKS_UPGRADE_FROM=${KVROCKS_UPGRADE_FROM:-2.16.0}
 E2E_DATASET_GIB=${E2E_DATASET_GIB:-1}
@@ -166,6 +168,34 @@ scenario_rolling_update() {
     fail "rolling_update: a replica copied the whole database again"
   report=$(finish_load rolling)
   assert_report rolling_update "$report" "$NO_LOSS" "$MAX_PLANNED_WRITE_GAP_SECONDS"
+}
+
+# A Kubernetes upgrade, as a managed node pool runs it without a spare node: each node in
+# turn is cordoned, drained, kept out for a while, then given back. With one Kvrocks pod per
+# node, the drained pod has nowhere else to go: the release runs on the others until its node
+# comes back, and the PodDisruptionBudget holds the next drain until then. Everything is
+# evicted, cluster DNS included, except the load generator: it measures, it is not under test.
+scenario_node_upgrade() {
+  local node report
+  start_load nodeupgrade
+  for node in $(worker_nodes); do
+    printf '    node_upgrade: draining %s at %s UTC, master on pod %s\n' \
+      "$node" "$(date -u +%H:%M:%S)" "$(current_master)"
+    kubectl cordon "$node" >/dev/null
+    kubectl drain "$node" --ignore-daemonsets --delete-emptydir-data \
+      --pod-selector='app!=loadgen' --timeout=600s >/dev/null ||
+      fail "node_upgrade: could not drain $node"
+    sleep "$NODE_UPGRADE_SECONDS"
+    kubectl uncordon "$node" >/dev/null
+    wait_healthy
+    printf '    node_upgrade: %s back and healthy at %s UTC, master on pod %s\n' \
+      "$node" "$(date -u +%H:%M:%S)" "$(current_master)"
+  done
+  # Every Kvrocks container is new: any full sync they logged happened during the upgrade.
+  [ "$(count_full_syncs)" = "0" ] ||
+    fail "node_upgrade: a replica copied the whole database again"
+  report=$(finish_load nodeupgrade)
+  assert_report node_upgrade "$report" "$NO_LOSS" "$MAX_PLANNED_WRITE_GAP_SECONDS"
 }
 
 # A Kvrocks upgrade, done as the README says: the master first moves to pod 0, which the

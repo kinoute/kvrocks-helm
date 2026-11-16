@@ -26,6 +26,7 @@ ALL_SCENARIOS=(
   upgrade_with_new_scripts
   kvrocks_upgrade
   drain
+  node_upgrade
   haproxy_restart
   master_pod_crash
   master_node_failure
@@ -100,7 +101,8 @@ load_images() {
 if [ -n "$E2E_CONTEXT" ]; then
   scenarios=("${@:-${CLUSTER_SCENARIOS[@]}}")
   for scenario in "${scenarios[@]}"; do
-    case " ${CLUSTER_SCENARIOS[*]} large_dataset " in
+    # Only when named: large_dataset, and node_upgrade, which drains every node in turn.
+    case " ${CLUSTER_SCENARIOS[*]} large_dataset node_upgrade " in
       *" $scenario "*) ;;
       *)
         printf '%s touches the nodes or the whole cluster: Kind only\n' "$scenario" >&2
