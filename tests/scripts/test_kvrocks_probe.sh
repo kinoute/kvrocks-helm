@@ -41,6 +41,19 @@ test_a_replica_a_majority_could_promote_is_ready() {
   assert_eq 0 "$STATUS" "exit status"
 }
 
+# Some redis-cli exit 1 on an error reply: it is still an answer, and it says no.
+test_sentinels_that_answer_an_error_do_not_make_a_replica_ready() {
+  promotable_replica
+  for sentinel in localhost kv-1.h kv-2.h; do
+    handler "$sentinel:26379" "sentinel replicas kvrocks" <<'HANDLER'
+echo "NOAUTH Authentication required."
+exit 1
+HANDLER
+  done
+  ready
+  assert_eq 1 "$STATUS" "exit status"
+}
+
 test_during_a_dns_outage_the_sentinels_that_answer_decide() {
   promotable_replica
   dns kv-1.h 10.0.0.1
