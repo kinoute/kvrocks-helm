@@ -157,3 +157,12 @@ tests:
       - equal:
           path: spec.automountServiceAccountToken
           value: false
+
+  - it: carries the labels the NetworkPolicy lets through to the client port
+    asserts:
+      - isSubset:
+          path: metadata.labels
+          content:
+            app.kubernetes.io/name: kvrocks
+            app.kubernetes.io/instance: db
+            app.kubernetes.io/component: test
