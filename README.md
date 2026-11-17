@@ -211,6 +211,10 @@ The chart does not take backups. Two ways that fit it:
 
 To restore, follow the migration above with the backup as the data.
 
+### Upgrading the chart
+
+A new version of the chart restarts the pods only when it changes what they run: an image, the configuration of Kvrocks or of HAProxy, or the scripts. The rolling update then restarts every Kvrocks pod, with one handover of the master. A version that changes none of these, a new alert rule for instance, restarts nothing: test `tests/chart/pod-templates.sh` checks it on every change.
+
 ### Upgrading Kvrocks
 
 1. Read the release notes of every version in between, for a change in the data format or in replication. Kvrocks publishes no compatibility promise between versions, and going back to an older version is not supported.
