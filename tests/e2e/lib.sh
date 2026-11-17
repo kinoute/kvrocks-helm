@@ -65,6 +65,9 @@ log() {
 
 fail() {
   printf 'FAILED: %s\n' "$*" >&2
+  # The run stops here anyway. Under errexit, the first diagnostic that fails, such as the
+  # logs of a pod on a dead node, would cut all the others short.
+  set +e
   describe_cluster >&2
   exit 1
 }
