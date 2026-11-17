@@ -180,6 +180,13 @@ bind port dir pidfile log-dir daemonize cluster-enabled requirepass masterauth s
 {{- if eq (int .Values.tls.internalPort) (int .Values.port) }}
 {{- fail "tls.internalPort must differ from port: Kvrocks serves TLS on port and keeps internalPort in clear" }}
 {{- end }}
+{{- /*
+Without HAProxy, clients ask Sentinel for the master. Under TLS, Sentinel speaks in clear,
+stays closed to clients, and would give them the port in clear anyway.
+*/}}
+{{- if and (include "kvrocks.isReplication" .) (not .Values.haproxy.enabled) }}
+{{- fail "tls.enabled needs haproxy.enabled in replication: Sentinel stays inside the release, and clients would have no way to the master" }}
+{{- end }}
 {{- end }}
 {{- /*
 Kvrocks reads a key in any case, and a value with a line break adds a line of its own: either

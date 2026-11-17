@@ -13,7 +13,9 @@ HAProxy is disabled: there is no write endpoint, clients must ask Sentinel for t
 {{- if .Values.readService.enabled }}
 Reads (any ready pod):       {{ $name }}-read.{{ $domain }}:{{ .Values.readService.port }}
 {{- end }}
+{{- if not .Values.tls.enabled }}
 Sentinel (master name "{{ .Values.sentinel.masterName }}"): {{ include "kvrocks.headlessServiceName" . }}.{{ $domain }}:{{ .Values.sentinel.port }}
+{{- end }}
 
 To move the master before maintenance, without losing a write:
 
