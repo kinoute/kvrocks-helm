@@ -87,6 +87,29 @@ tests:
     asserts:
       - notFailedTemplate: {}
 
+  # --- Disruption budget: a drain must leave a Sentinel majority ---
+
+  - it: refuses a budget that lets a drain take 2 pods out of 3
+    set:
+      podDisruptionBudget.maxUnavailable: 2
+    asserts:
+      - failedTemplate:
+          errorMessage: "podDisruptionBudget.maxUnavailable must be at most 1 with 3 pods: a drain must leave a majority of Sentinels"
+
+  - it: accepts 2 pods out of 5
+    set:
+      replicaCount: 5
+      podDisruptionBudget.maxUnavailable: 2
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: ignores the budget when it is off
+    set:
+      podDisruptionBudget.enabled: false
+      podDisruptionBudget.maxUnavailable: 2
+    asserts:
+      - notFailedTemplate: {}
+
   # --- Grace period: the handover of the master must fit in it ---
 
   - it: refuses a grace period shorter than a handover
