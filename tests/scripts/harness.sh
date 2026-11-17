@@ -115,6 +115,12 @@ echo OK
 HANDLER
 }
 
+# Another script holds writes paused, as the handover and the fencing note it down.
+held_by() { # $1: holder, $2: milliseconds still to go; negative for a hold that ran out
+  mkdir -p "$WRITE_HOLDS_DIR"
+  echo "$(($(date +%s%3N) + $2))" >"$WRITE_HOLDS_DIR/$1"
+}
+
 dns() { # $1: name, $2: address
   mkdir -p "$WORLD/dns"
   printf '%s\n' "$2" >"$WORLD/dns/$1"
@@ -153,7 +159,8 @@ assert_not_called() { # $1: start of a call
 failed=0
 for test in $(grep -o '^test_[a-z0-9_]*()' "$1" | tr -d '()'); do
   WORLD=$(mktemp -d)
-  export WORLD
+  WRITE_HOLDS_DIR="$WORLD/holds"
+  export WORLD WRITE_HOLDS_DIR
   if output=$( (set -e; "$test") 2>&1); then
     echo "  ok      $test"
   else

@@ -159,6 +159,24 @@ test_a_fenced_master_demoted_to_replica_is_released() {
   assert_called "localhost:6379 client unpause"
 }
 
+test_a_master_followed_again_leaves_a_pause_of_the_handover_alone() {
+  healthy_master
+  start_fence
+  sleep 2
+  down 10.0.0.1:26379
+  down 10.0.0.2:26379
+  sleep 4
+  assert_called "localhost:6379 client pause"
+  held_by handover 60000
+  server 10.0.0.1:26379
+  server 10.0.0.2:26379
+  sleep 3
+  stop_fence
+  assert_not_called "localhost:6379 client unpause"
+  grep -q 'the handover still holds them' "$WORLD/fence.log" || fail "no word of the handover; log was:
+$(cat "$WORLD/fence.log")"
+}
+
 test_a_master_its_replicas_still_follow_is_not_paused() {
   healthy_master
   kvrocks_replica 10.0.0.1 kv-0.h

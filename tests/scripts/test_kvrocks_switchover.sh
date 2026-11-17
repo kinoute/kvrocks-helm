@@ -149,6 +149,26 @@ test_a_master_that_will_not_step_down_keeps_its_writes_paused() {
   assert_not_called "localhost:6379 client unpause"
 }
 
+test_giving_up_leaves_a_pause_of_the_fencing_alone() {
+  cluster_ready
+  kvrocks_replica kv-2.h kv-0.h 50
+  held_by fencing 60000
+  switchover
+  assert_eq 1 "$STATUS" "exit status"
+  assert_not_called "localhost:6379 client unpause"
+  grep -q 'the fencing still holds them' "$WORLD/out" || fail "no word of the fencing; output was:
+$(cat "$WORLD/out")"
+}
+
+test_a_pause_of_the_fencing_that_ran_out_does_not_hold_writes() {
+  cluster_ready
+  kvrocks_replica kv-2.h kv-0.h 50
+  held_by fencing -1000
+  switchover
+  assert_eq 1 "$STATUS" "exit status"
+  assert_called "localhost:6379 client unpause"
+}
+
 # The failover request gets no answer within the script's timeout.
 hang_failover_request() {
   handler localhost:26379 "sentinel failover kvrocks" <<'HANDLER'

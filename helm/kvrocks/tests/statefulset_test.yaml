@@ -125,6 +125,20 @@ tests:
             name: KVROCKS_REPLICAS
             value: "5"
 
+  - it: shares /tmp between the fence and kvrocks, where each notes the write pause it holds
+    template: statefulset.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.initContainers[?(@.name == "fence")].volumeMounts
+          content:
+            name: tmp
+            mountPath: /tmp
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].volumeMounts
+          content:
+            name: tmp
+            mountPath: /tmp
+
   - it: runs no fence when fencing is disabled
     template: statefulset.yaml
     set:
