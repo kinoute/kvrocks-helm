@@ -433,6 +433,16 @@ tests:
       - failedTemplate:
           errorMessage: tls.authClients needs tls.ca.secret, the CA client certificates must chain to
 
+  - it: refuses a client certificate for helm test without the CA to check the server with
+    set:
+      tls.enabled: true
+      tls.existingSecret: db-server-tls
+      tls.authClients: false
+      tls.clientSecret: db-client-tls
+    asserts:
+      - failedTemplate:
+          errorMessage: "tls.clientSecret needs tls.ca.secret: helm test checks the server certificate against that CA"
+
   - it: refuses the same port for TLS and in clear
     set:
       tls.enabled: true
