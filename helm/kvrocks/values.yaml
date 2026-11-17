@@ -163,13 +163,15 @@ startupProbe: # @schema additionalProperties:true
   timeoutSeconds: 5
   failureThreshold: 240
 
-# -- Restarts a Kvrocks that stops answering for a minute.
+# -- Restarts a Kvrocks that stops answering for a minute. The Sentinel and exporter
+# sidecars take the same timings.
 livenessProbe: # @schema additionalProperties:true
   periodSeconds: 10
   timeoutSeconds: 5
   failureThreshold: 6
 
-# -- A replica is ready once it follows the master and has finished syncing.
+# -- A replica is ready once it follows the master and has finished syncing. The Sentinel
+# sidecar takes the same timings.
 readinessProbe: # @schema additionalProperties:true
   periodSeconds: 5
   timeoutSeconds: 5

@@ -98,7 +98,7 @@ For a release named `db`, with the default ports:
 | image.registry | string | `"docker.io"` | Registry of the Kvrocks image. |
 | image.repository | string | `"apache/kvrocks"` | Repository of the Kvrocks image. |
 | image.tag | string | the chart's `appVersion` | Tag of the Kvrocks image. `replication` needs Kvrocks 2.16.0 or later. |
-| livenessProbe | object | `{"failureThreshold":6,"periodSeconds":10,"timeoutSeconds":5}` | Restarts a Kvrocks that stops answering for a minute. |
+| livenessProbe | object | `{"failureThreshold":6,"periodSeconds":10,"timeoutSeconds":5}` | Restarts a Kvrocks that stops answering for a minute. The Sentinel and exporter sidecars take the same timings. |
 | metrics.enabled | bool | `true` | Runs kvrocks_exporter next to each Kvrocks, and exposes HAProxy's own metrics. |
 | metrics.image | object | `{"digest":"","pullPolicy":"IfNotPresent","registry":"docker.io","repository":"kvrocks/kvrocks-exporter","tag":"1.0.11"}` | Image of kvrocks_exporter. Same fields as `image`. |
 | metrics.port | int | `9121` | Port of kvrocks_exporter. |
@@ -137,7 +137,7 @@ For a release named `db`, with the default ports:
 | readService.enabled | bool | `true` | Creates a second Service that spreads reads over every ready pod, replicas included. Replication is asynchronous: a read may return slightly stale data. |
 | readService.port | int | `6379` | Port of the read Service. |
 | readService.type | string | `"ClusterIP"` | Type of the read Service. |
-| readinessProbe | object | `{"failureThreshold":3,"periodSeconds":5,"timeoutSeconds":5}` | A replica is ready once it follows the master and has finished syncing. |
+| readinessProbe | object | `{"failureThreshold":3,"periodSeconds":5,"timeoutSeconds":5}` | A replica is ready once it follows the master and has finished syncing. The Sentinel sidecar takes the same timings. |
 | replicaCount | int | `3` | Number of Kvrocks pods in `replication` mode: one master, the rest replicas. At least 3, so that a majority of Sentinels survives the loss of one pod. |
 | resources | object | `{}` | Resources of the Kvrocks container. Without any, the pods run as BestEffort and are the first evicted under memory pressure. Kvrocks caches up to 4 GB of blocks by default (`rocksdb.block_cache_size` in `config`). |
 | sentinel.downAfterMilliseconds | int | `10000` | Milliseconds a master must be unreachable before Sentinel declares it down. A crash failover takes a little longer than this. |
