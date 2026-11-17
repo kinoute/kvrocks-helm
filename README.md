@@ -185,7 +185,7 @@ Each pod holds a full copy of the data. Give its volume at least twice the size 
 - a full sync downloads a complete checkpoint before it replaces the old database, so a replica needs room for both copies at once ([`storage.cc`](https://github.com/apache/kvrocks/blob/v2.17.0/src/storage/storage.cc));
 - every pod keeps its write-ahead log for replicas that fall behind, up to `rocksdb.wal_size_limit_mb` (16 GB by default) or `rocksdb.wal_ttl_seconds` (3 h). After a burst of writes, that log weighs as much as what was written.
 
-A full sync happens when a pod is new or lost its volume, and when a former master comes back with writes the new master never got. Its duration grows with the data.
+A full sync happens when a former master comes back with writes the new master never got, and when a pod is new or lost its volume. In that second case, a master whose write-ahead log still goes back to its first write has the pod replay that log instead ([`cmd_replication.cc`](https://github.com/apache/kvrocks/blob/v2.17.0/src/commands/cmd_replication.cc)): that only lasts until the log reaches one of the two limits above. The duration of a full sync grows with the data.
 
 With 10 GiB written on a real cluster (see [On a real cluster](#on-a-real-cluster)), each pod held 13.6 GB of data and, right after the writes, 12 to 15 GB of archived log on top of it. A full sync of those 13.6 GB took 5 minutes. As a rule of thumb, give each volume twice the data plus 16 GB.
 
