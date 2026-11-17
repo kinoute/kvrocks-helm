@@ -188,6 +188,27 @@ stays closed to clients, and would give them the port in clear anyway.
 {{- fail "tls.enabled needs haproxy.enabled in replication: Sentinel stays inside the release, and clients would have no way to the master" }}
 {{- end }}
 {{- end }}
+{{- /* The containers of a pod share its network: two of them cannot listen on one port. */}}
+{{- $kvrocksPorts := list (int .Values.port) }}
+{{- if .Values.tls.enabled }}
+{{- $kvrocksPorts = append $kvrocksPorts (int .Values.tls.internalPort) }}
+{{- end }}
+{{- if include "kvrocks.isReplication" . }}
+{{- $kvrocksPorts = append $kvrocksPorts (int .Values.sentinel.port) }}
+{{- end }}
+{{- if .Values.metrics.enabled }}
+{{- $kvrocksPorts = append $kvrocksPorts (int .Values.metrics.port) }}
+{{- end }}
+{{- $portsSeen := dict }}
+{{- range $port := $kvrocksPorts }}
+{{- if hasKey $portsSeen (toString $port) }}
+{{- fail (printf "port %d is used twice in the Kvrocks pods: port, tls.internalPort, sentinel.port and metrics.port must differ" $port) }}
+{{- end }}
+{{- $_ := set $portsSeen (toString $port) true }}
+{{- end }}
+{{- if and (include "kvrocks.haproxyEnabled" .) (eq (int .Values.port) (int .Values.haproxy.healthPort)) }}
+{{- fail "haproxy.healthPort must differ from port: HAProxy listens on both" }}
+{{- end }}
 {{- /*
 Kvrocks reads a key in any case, and a value with a line break adds a line of its own: either
 would slip a reserved setting past the check below. The namespace tokens are credentials, and
