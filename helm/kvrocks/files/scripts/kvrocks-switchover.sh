@@ -321,6 +321,9 @@ fi
 # Until Sentinel accepts the failover, giving up is safe: writes simply resume here.
 writes_held=yes
 target_offset=$(kv_info_field localhost master_repl_offset)
+if [ -z "$target_offset" ]; then
+  give_up "cannot read the replication offset of this Kvrocks"
+fi
 
 if ! wait_until_caught_up "$target_offset" "$candidates" "$deadline"; then
   give_up "a replica Sentinel could promote did not reach offset $target_offset in time"
