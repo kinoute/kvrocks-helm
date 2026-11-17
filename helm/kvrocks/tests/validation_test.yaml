@@ -255,6 +255,22 @@ tests:
       - failedTemplate:
           errorMessage: config.rename-command is managed by the chart and cannot be overridden
 
+  - it: refuses slave-read-only in config, which would let replicas drift from their master
+    set:
+      config:
+        slave-read-only: "no"
+    asserts:
+      - failedTemplate:
+          errorMessage: config.slave-read-only is managed by the chart and cannot be overridden
+
+  - it: refuses slave-priority in config, which at 0 would leave Sentinel nothing to promote
+    set:
+      config:
+        slave-priority: 0
+    asserts:
+      - failedTemplate:
+          errorMessage: config.slave-priority is managed by the chart and cannot be overridden
+
   # --- Shape of the config entries: nothing may slip a reserved key past the check ---
 
   - it: refuses a reserved key in capitals, which Kvrocks would read all the same
