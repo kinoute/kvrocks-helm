@@ -187,6 +187,23 @@ HANDLER
   assert_not_called "client pause"
 }
 
+test_an_unreadable_offset_cancels_the_handover_at_once() {
+  cluster_ready
+  reply localhost:6379 "info replication" "# Replication
+role:master
+connected_slaves:2"
+  started=$(date +%s%3N)
+  switchover
+  elapsed=$(($(date +%s%3N) - started))
+  assert_eq 1 "$STATUS" "exit status"
+  assert_not_called "sentinel failover"
+  assert_called "localhost:6379 client unpause"
+  grep -q 'cannot read the replication offset' "$WORLD/out" || fail "no reason given; output was:
+$(cat "$WORLD/out")"
+  # Waiting for the replicas would take until the deadline, 2.5 s in.
+  [ "$elapsed" -lt 2000 ] || fail "gave up after $elapsed ms"
+}
+
 test_giving_up_leaves_a_pause_of_the_fencing_alone() {
   cluster_ready
   kvrocks_replica kv-2.h kv-0.h 50
