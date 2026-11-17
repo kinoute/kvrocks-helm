@@ -196,6 +196,7 @@ tests:
       sentinel.downAfterMilliseconds: 15000
       sentinel.failoverTimeoutMilliseconds: 90000
       sentinel.parallelSyncs: 2
+      terminationGracePeriodSeconds: 130
     asserts:
       - contains:
           path: spec.template.spec.initContainers[?(@.name == "sentinel")].env
@@ -218,6 +219,7 @@ tests:
     set:
       switchover.pauseMilliseconds: 4500
       sentinel.failoverTimeoutMilliseconds: 90000
+      terminationGracePeriodSeconds: 130
     asserts:
       - contains:
           path: spec.template.spec.containers[?(@.name == "kvrocks")].env

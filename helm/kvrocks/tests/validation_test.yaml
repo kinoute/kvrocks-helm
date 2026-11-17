@@ -87,6 +87,37 @@ tests:
     asserts:
       - notFailedTemplate: {}
 
+  # --- Grace period: the handover of the master must fit in it ---
+
+  - it: refuses a grace period shorter than a handover
+    set:
+      terminationGracePeriodSeconds: 60
+    asserts:
+      - failedTemplate:
+          errorMessage: "terminationGracePeriodSeconds must be at least 95: the handover of a master can take switchover.pauseMilliseconds plus sentinel.failoverTimeoutMilliseconds, then Kvrocks needs 30 s to stop"
+
+  - it: refuses a failover timeout the grace period cannot cover
+    set:
+      sentinel.failoverTimeoutMilliseconds: 600000
+    asserts:
+      - failedTemplate:
+          errorMessage: "terminationGracePeriodSeconds must be at least 635: the handover of a master can take switchover.pauseMilliseconds plus sentinel.failoverTimeoutMilliseconds, then Kvrocks needs 30 s to stop"
+
+  - it: accepts a grace period just long enough
+    set:
+      switchover.pauseMilliseconds: 5500
+      sentinel.failoverTimeoutMilliseconds: 60000
+      terminationGracePeriodSeconds: 96
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: does not check the grace period in standalone mode
+    set:
+      architecture: standalone
+      terminationGracePeriodSeconds: 10
+    asserts:
+      - notFailedTemplate: {}
+
   # --- Settings the chart owns: one test per reserved key ---
 
   - it: refuses bind in config

@@ -6,3 +6,5 @@ haproxy:
   maxConnections: 1000000
 sentinel:
   failoverTimeoutMilliseconds: 1200000
+# Long enough for a handover with that failover timeout.
+terminationGracePeriodSeconds: 1300
