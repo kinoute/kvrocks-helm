@@ -23,7 +23,9 @@ sentinel_opinions() {
   for host in localhost $(peer_fqdns); do
     (
       CLI_TIMEOUT_SECONDS=$SENTINEL_PROBE_TIMEOUT_SECONDS
-      reply=$(sentinel_cli "$host" sentinel replicas "$SENTINEL_MASTER_NAME") || exit 0
+      # Read the reply, never the exit status: an error reply, as NOAUTH, says no, whether this
+      # redis-cli exits 0 on it or not. No reply at all is a Sentinel that does not answer.
+      reply=$(sentinel_cli "$host" sentinel replicas "$SENTINEL_MASTER_NAME")
       [ -n "$reply" ] || exit 0
       if printf '%s\n' "$reply" | promotable_replicas_from_reply | grep -q -x -F "$(self_fqdn)"; then
         echo yes
