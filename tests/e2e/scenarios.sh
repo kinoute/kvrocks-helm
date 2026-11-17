@@ -13,6 +13,8 @@ MAX_CRASH_WRITE_GAP_SECONDS=${MAX_CRASH_WRITE_GAP_SECONDS:-40}
 OUTAGE_KEYS=2000
 EMPTY_POD_HEAD_START_SECONDS=180
 DNS_OUTAGE_SECONDS=60
+# An HAProxy pod started without cluster DNS must route within this delay once DNS answers.
+HAPROXY_ROUTES_AFTER_DNS_SECONDS=30
 # An isolated master must stop taking writes within this delay.
 FENCE_DEADLINE_SECONDS=5
 # The writes an isolated master may still acknowledge, in seconds of load: what it takes
@@ -375,6 +377,31 @@ scenario_dns_outage() {
     fail "dns_outage: the fencing paused a healthy master"
   report=$(finish_load dnsoutage)
   assert_report dns_outage "$report" "$NO_LOSS" "$MAX_PLANNED_WRITE_GAP_SECONDS"
+}
+
+# An HAProxy pod that starts while cluster DNS is down knows the address of no pod, and
+# routes nowhere. It must wait, alive, and find the master as soon as DNS answers again. A
+# start that hangs on name lookups fails the liveness probe: Kubernetes then restarts the
+# pod over and over, each time after a longer wait, and DNS may be back long before it is.
+scenario_haproxy_starts_without_dns() {
+  local selector="app.kubernetes.io/instance=$RELEASE,app.kubernetes.io/component=haproxy"
+  local old_pod new_pod restarts dns_back
+  old_pod=$(k get pods -l "$selector" -o name | head -n 1)
+  stop_cluster_dns
+  k delete "$old_pod" >/dev/null
+  sleep "$DNS_OUTAGE_SECONDS"
+  restore_cluster_dns
+  dns_back=$SECONDS
+  k rollout status "deployment/$FULLNAME-haproxy" \
+    --timeout="${HAPROXY_ROUTES_AFTER_DNS_SECONDS}s" >/dev/null ||
+    fail "haproxy_starts_without_dns: the new pod still routes nowhere ${HAPROXY_ROUTES_AFTER_DNS_SECONDS}s after DNS came back"
+  printf '    haproxy_starts_without_dns: the new pod routed %ss after DNS came back\n' \
+    $((SECONDS - dns_back))
+  new_pod=$(k get pods -l "$selector" --sort-by=.metadata.creationTimestamp -o name | tail -n 1)
+  restarts=$(k get "$new_pod" -o jsonpath='{.status.containerStatuses[0].restartCount}')
+  [ "$restarts" = "0" ] ||
+    fail "haproxy_starts_without_dns: the new pod was restarted $restarts times while DNS was down"
+  wait_healthy
 }
 
 # A replica loses its disk: it must come back empty and copy everything again.
