@@ -128,7 +128,7 @@ For a release named `db`, with the default ports:
 | podAnnotations | object | `{}` | Annotations of the Kvrocks pods. |
 | podAntiAffinity | string | `"hard"` | `hard`: one Kvrocks pod per node, or the pod stays Pending. Two pods on one node lose the Sentinel majority, and any failover, together with that node. `soft` only prefers it, for clusters with fewer nodes than pods. Ignored when `affinity` is set. |
 | podDisruptionBudget.enabled | bool | `true` | Creates a PodDisruptionBudget for the Kvrocks pods. |
-| podDisruptionBudget.maxUnavailable | int | `1` | Kvrocks pods a voluntary disruption, such as a drain, may stop at once. |
+| podDisruptionBudget.maxUnavailable | int | `1` | Kvrocks pods a voluntary disruption, such as a drain, may stop at once. At most the pods beyond a majority: 1 out of 3, 2 out of 5. |
 | podLabels | object | `{}` | Labels of the Kvrocks pods. |
 | podSecurityContext | object | `{"fsGroup":999,"fsGroupChangePolicy":"OnRootMismatch","runAsGroup":999,"runAsNonRoot":true,"runAsUser":999,"seccompProfile":{"type":"RuntimeDefault"}}` | Security context of the Kvrocks pods. 999 is the user of the Kvrocks image. |
 | port | int | `6379` | Port clients reach Kvrocks on. With TLS it is the TLS port, and the traffic that stays inside the release (replication, Sentinel, probes, exporter) uses `tls.internalPort`. |

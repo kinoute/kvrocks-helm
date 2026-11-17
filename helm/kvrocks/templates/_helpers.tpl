@@ -238,6 +238,11 @@ would slip a reserved setting past the check below. The namespace tokens are cre
 {{- if or (lt $quorum 1) (gt $quorum (int .Values.replicaCount)) }}
 {{- fail "sentinel.quorum must be between 1 and replicaCount: no more Sentinels than pods can agree" }}
 {{- end }}
+{{- /* A drain that stops more pods than this leaves no Sentinel majority, so no failover. */}}
+{{- $maxUnavailable := sub (int .Values.replicaCount) (int (include "kvrocks.majority" .)) }}
+{{- if and .Values.podDisruptionBudget.enabled (gt (int .Values.podDisruptionBudget.maxUnavailable) $maxUnavailable) }}
+{{- fail (printf "podDisruptionBudget.maxUnavailable must be at most %d with %d pods: a drain must leave a majority of Sentinels" $maxUnavailable (int .Values.replicaCount)) }}
+{{- end }}
 {{- if not .Values.image.digest }}
 {{- $version := trimPrefix "v" (default .Chart.AppVersion .Values.image.tag) }}
 {{- if and (regexMatch "^[0-9]+\\.[0-9]+\\.[0-9]+" $version) (not (semverCompare ">=2.16.0-0" $version)) }}

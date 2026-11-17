@@ -178,7 +178,8 @@ readinessProbe: # @schema additionalProperties:true
 podDisruptionBudget:
   # -- Creates a PodDisruptionBudget for the Kvrocks pods.
   enabled: true
-  # -- Kvrocks pods a voluntary disruption, such as a drain, may stop at once.
+  # -- Kvrocks pods a voluntary disruption, such as a drain, may stop at once. At most
+  # the pods beyond a majority: 1 out of 3, 2 out of 5.
   maxUnavailable: 1
 
 serviceAccount:
