@@ -383,13 +383,16 @@ assert_report() { # $1: scenario, $2: JSON report, $3: max lost writes, $4: max 
 # Writes keys <prefix>:1..<count> through the write endpoint, as a client would.
 # Waits for the endpoint to take writes first, and fails unless every write was acknowledged.
 write_keys() { # $1: prefix, $2: count
-  local deadline=$((SECONDS + HEALTHY_TIMEOUT_SECONDS)) acked
+  local deadline=$((SECONDS + HEALTHY_TIMEOUT_SECONDS)) replies acked
   until [ "$(client_cli "\$CLI set $1:probe 1")" = "OK" ]; do
     [ "$SECONDS" -lt "$deadline" ] || fail "the write endpoint never took a write"
     sleep 1
   done
-  acked=$(client_cli "seq 1 $2 | sed 's/.*/SET $1-$RUN_ID:& &/' | \$CLI | grep -c '^OK$'")
-  [ "$acked" = "$2" ] || fail "only $acked of the $2 writes of $1 were acknowledged"
+  # Connection errors come on stderr: kept with the replies, to tell what went wrong.
+  replies=$(client_cli "seq 1 $2 | sed 's/.*/SET $1-$RUN_ID:& &/' | \$CLI 2>&1")
+  acked=$(grep -c -x OK <<<"$replies" || true)
+  [ "$acked" = "$2" ] || fail "only $acked of the $2 writes of $1 were acknowledged; the other replies were:
+$(grep -v -x OK <<<"$replies" | sort | uniq -c)"
 }
 
 # Counts how many of the keys <prefix>:1..<count> a host holds: the write endpoint through
