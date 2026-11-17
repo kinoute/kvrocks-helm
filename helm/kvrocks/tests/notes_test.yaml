@@ -1,0 +1,22 @@
+suite: NOTES.txt
+templates:
+  - NOTES.txt
+release:
+  name: db
+  namespace: data
+set:
+  auth.password: test-password
+tests:
+  - it: points Sentinel-aware clients to Sentinel without TLS
+    asserts:
+      - matchRegexRaw:
+          pattern: 'Sentinel \(master name "kvrocks"\): db-kvrocks-headless\.data\.svc\.cluster\.local:26379'
+
+  - it: does not point clients to Sentinel under TLS, where it stays inside the release
+    set:
+      tls.enabled: true
+      tls.existingSecret: db-server-tls
+      tls.ca.secret: db-ca
+    asserts:
+      - notMatchRegexRaw:
+          pattern: Sentinel \(master name
