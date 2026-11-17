@@ -24,14 +24,18 @@ spec:
       {{- $selectorLabels | nindent 6 }}
   template:
     metadata:
+      # Nothing that changes with the chart version: every new chart would restart every pod.
       labels:
-        {{- include "kvrocks.labels" . | nindent 8 }}
-        app.kubernetes.io/component: kvrocks
+        {{- $selectorLabels | nindent 8 }}
+        {{- with .Values.commonLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         {{- with .Values.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
       annotations:
-        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        # The data only: the labels of the ConfigMap carry the chart version.
+        checksum/config: {{ (include (print $.Template.BasePath "/configmap.yaml") . | fromYaml).data | toJson | sha256sum }}
         kubectl.kubernetes.io/default-container: kvrocks
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
