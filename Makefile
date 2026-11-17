@@ -15,7 +15,7 @@ KUBECONFORM := kubeconform -strict -summary -schema-location default -schema-loc
 
 # The scenarios worth running on every change. Node failures, the network partition and
 # volume losses only run in the full suite.
-QUICK_SCENARIOS := install switchover rolling_update master_pod_crash helm_test
+QUICK_SCENARIOS := install switchover rolling_update master_pod_crash tls_clients helm_test
 
 .PHONY: test lint schema docs manifests unit scripts rules loadgen e2e e2e-quick e2e-cluster
 
@@ -63,8 +63,8 @@ loadgen: ## Lint, types and tests of the load generator used by the end-to-end s
 e2e: ## Every failure scenario on a local Kind cluster (needs docker, kind, kubectl, jq)
 	tests/e2e/run.sh
 
-e2e-quick: ## The handover, rolling update and master crash scenarios only, without TLS
-	E2E_TLS=0 tests/e2e/run.sh $(QUICK_SCENARIOS)
+e2e-quick: ## The handover, rolling update, master crash and TLS client scenarios only
+	tests/e2e/run.sh $(QUICK_SCENARIOS)
 
 e2e-cluster: ## The scenarios that leave nodes alone, on an existing cluster: CONTEXT=<kube context>
 	@test -n "$(CONTEXT)" || { echo "usage: make e2e-cluster CONTEXT=<kube context>"; exit 1; }

@@ -150,7 +150,7 @@ tls:
 - **Renewing a certificate restarts the pods.** Kvrocks does not notice that its files changed. With `tls.reloader: true`, the StatefulSet carries the annotation of [Reloader](https://github.com/stakater/Reloader), which rolls the pods when either Secret changes. A rolling update hands the master over without losing a write. Without Reloader, run `kubectl rollout restart statefulset/db-kvrocks` after the renewal.
 - **`helm test` needs a client certificate** under `tls.authClients`: a `kubernetes.io/tls` Secret named in `tls.clientSecret`. Without it, the test is not installed.
 
-The scenario `tls_clients` checks that a client with a certificate from the CA gets in, and that clients without a certificate, with a certificate from another CA, in clear, or on the port in clear from outside the release do not. Every other scenario runs with TLS on too, except in `make e2e-quick`. The scenario `tls_enabled_later` turns TLS on that way for a release that runs without it and holds data: the rolling update must finish, no replica may copy the database again, and every key must still be on every pod.
+The scenario `tls_clients` checks that a client with a certificate from the CA gets in, and that clients without a certificate, with a certificate from another CA, in clear, or on the port in clear from outside the release do not. Every other scenario runs with TLS on too, unless `E2E_TLS=0` is set. The scenario `tls_enabled_later` turns TLS on that way for a release that runs without it and holds data: the rolling update must finish, no replica may copy the database again, and every key must still be on every pod.
 
 ### Moving the master before maintenance
 
@@ -337,7 +337,7 @@ With data: `large_dataset` wrote 10 GiB shaped like a production workload, 30.4 
 
 ```bash
 make test        # lint, Kubernetes schemas, helm-unittest, script tests, alert rules, load generator
-make e2e-quick   # handover, rolling update and master crash on a local Kind cluster
+make e2e-quick   # handover, rolling update, master crash and TLS clients on a local Kind cluster
 make e2e         # every failure scenario
 make e2e-cluster CONTEXT=<kube context>   # the scenarios that leave the nodes alone, on a real cluster
 ```
