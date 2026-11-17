@@ -24,11 +24,13 @@ data:
       # The idle timeouts are long; TCP keepalive is what detects a peer that vanished.
       option clitcpka
       option srvtcpka
-      # Pod IPs change on restart: resolve at runtime, and start even if a pod is not in DNS yet.
+      # Pod IPs change on restart: resolve at runtime only, and start with no address. Looked
+      # up at startup as well, each server holds HAProxy back for ten seconds when cluster DNS
+      # does not answer: it listens too late for its liveness probe and is restarted in a loop.
       # A server is down until its first check succeeds. HAProxy otherwise takes every server
       # for up when it starts: every Sentinel then votes for every pod, and the connections
       # opened before the first checks go to pod 0, master or not.
-      default-server init-addr last,libc,none resolvers cluster_dns resolve-prefer ipv4 init-state down
+      default-server init-addr none resolvers cluster_dns resolve-prefer ipv4 init-state down
 
     resolvers cluster_dns
       parse-resolv-conf
