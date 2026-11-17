@@ -59,7 +59,7 @@
           "type": "boolean"
         },
         "capabilities": {
-          "additionalProperties": false,
+          "additionalProperties": true,
           "properties": {
             "drop": {
               "items": {
@@ -117,6 +117,7 @@
           "additionalProperties": false,
           "properties": {
             "fall": {
+              "minimum": 1,
               "type": "integer"
             },
             "interval": {
@@ -178,6 +179,7 @@
           "type": "object"
         },
         "maxConnections": {
+          "minimum": 1,
           "type": "integer"
         },
         "nodeSelector": {
@@ -220,7 +222,7 @@
               "type": "integer"
             },
             "seccompProfile": {
-              "additionalProperties": false,
+              "additionalProperties": true,
               "properties": {
                 "type": {
                   "type": "string"
@@ -529,7 +531,7 @@
           "type": "integer"
         },
         "seccompProfile": {
-          "additionalProperties": false,
+          "additionalProperties": true,
           "properties": {
             "type": {
               "type": "string"
@@ -603,9 +605,11 @@
       "additionalProperties": false,
       "properties": {
         "downAfterMilliseconds": {
+          "minimum": 1,
           "type": "integer"
         },
         "failoverTimeoutMilliseconds": {
+          "minimum": 1,
           "type": "integer"
         },
         "image": {
@@ -635,9 +639,11 @@
           "type": "object"
         },
         "masterName": {
+          "pattern": "^[A-Za-z0-9._-]+$",
           "type": "string"
         },
         "parallelSyncs": {
+          "minimum": 1,
           "type": "integer"
         },
         "port": {

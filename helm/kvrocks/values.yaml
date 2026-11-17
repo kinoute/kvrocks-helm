@@ -145,14 +145,14 @@ podSecurityContext: # @schema additionalProperties:true
   runAsGroup: 999
   fsGroup: 999
   fsGroupChangePolicy: OnRootMismatch
-  seccompProfile:
+  seccompProfile: # @schema additionalProperties:true
     type: RuntimeDefault
 
 # -- Security context of every container of the Kvrocks pods.
 containerSecurityContext: # @schema additionalProperties:true
   allowPrivilegeEscalation: false
   readOnlyRootFilesystem: true
-  capabilities:
+  capabilities: # @schema additionalProperties:true
     drop:
       - ALL
 
@@ -225,17 +225,17 @@ sentinel:
   # -- Port of Sentinel.
   port: 26379 # @schema minimum:1;maximum:65535
   # -- Name Sentinel knows the master by; Sentinel-aware clients need it.
-  masterName: kvrocks
+  masterName: kvrocks # @schema pattern:^[A-Za-z0-9._-]+$
   # -- Sentinels that must agree a master is down.
   # @default -- a majority of the pods
   quorum: "" # @schema type:[string,integer]
   # -- Milliseconds a master must be unreachable before Sentinel declares it down.
   # A crash failover takes a little longer than this.
-  downAfterMilliseconds: 10000
+  downAfterMilliseconds: 10000 # @schema minimum:1
   # -- Milliseconds before Sentinel retries a failover that did not complete.
-  failoverTimeoutMilliseconds: 60000
+  failoverTimeoutMilliseconds: 60000 # @schema minimum:1
   # -- Replicas re-synced at the same time after a failover.
-  parallelSyncs: 1
+  parallelSyncs: 1 # @schema minimum:1
   # -- Resources of the Sentinel sidecar.
   resources: {} # @schema additionalProperties:true
 
@@ -268,7 +268,7 @@ haproxy:
   # -- Number of HAProxy pods. They share no state: any of them routes to the same master.
   replicaCount: 2 # @schema minimum:1
   # -- Client connections each HAProxy pod accepts.
-  maxConnections: 10000
+  maxConnections: 10000 # @schema minimum:1
   # -- How long HAProxy keeps the last known address of a pod when cluster DNS stops answering.
   dnsOutageTolerance: 1h
   # -- Port of the health endpoints (`/livez`, `/readyz`) and of `/metrics`.
@@ -278,7 +278,7 @@ haproxy:
     interval: 1s
     # -- Failed role checks in a row before HAProxy cuts the connections to a Kvrocks.
     # Higher than 1 so that one slow answer from a busy master does not drop every client.
-    fall: 3
+    fall: 3 # @schema minimum:1
   # -- Restarts an HAProxy whose health endpoint stops answering.
   livenessProbe: # @schema additionalProperties:true
     periodSeconds: 10
@@ -322,7 +322,7 @@ haproxy:
     runAsNonRoot: true
     runAsUser: 99
     runAsGroup: 99
-    seccompProfile:
+    seccompProfile: # @schema additionalProperties:true
       type: RuntimeDefault
   podDisruptionBudget:
     # -- Creates a PodDisruptionBudget for the HAProxy pods.
