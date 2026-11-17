@@ -26,14 +26,14 @@ SENTINEL_DOWN_AFTER_SECONDS=10
 MAX_DEMOTION_SECONDS=5
 # About one second of writes: the time Sentinel needs between promoting and switching.
 MAX_LOSS_ON_PLAIN_FAILOVER=${MAX_LOSS_ON_PLAIN_FAILOVER:-30000}
-# Size of the data large_dataset writes, and how long it may take per GiB, generously.
 # How long node_upgrade keeps each node out, as if it were being upgraded.
 NODE_UPGRADE_SECONDS=${NODE_UPGRADE_SECONDS:-30}
 # The oldest Kvrocks the chart supports in replication mode, upgraded by kvrocks_upgrade.
 KVROCKS_UPGRADE_FROM=${KVROCKS_UPGRADE_FROM:-2.16.0}
+# Size of the data large_dataset writes, and how long it may take per GiB, generously.
 E2E_DATASET_GIB=${E2E_DATASET_GIB:-1}
 DATASET_SECONDS_PER_GIB=900
-# A full sync of the whole dataset, or a restart on it, must be over within this delay.
+# A replica must be back in sync on the whole dataset within this delay, volume lost or not.
 LARGE_DATASET_TIMEOUT_SECONDS=${LARGE_DATASET_TIMEOUT_SECONDS:-3600}
 
 scenario_install() {
@@ -647,8 +647,10 @@ scenario_standalone() {
 }
 
 # Fills the cluster with data shaped like a production workload, then measures
-# what its size costs: the disk of each pod, the full sync of a replica that lost its volume,
+# what its size costs: the disk of each pod, the return of a replica that lost its volume,
 # and the restart of a pod on a full volume. Reports numbers, asserts no threshold on them.
+# An empty replica does not always copy the files of the master: while the master still holds
+# its whole write-ahead log, the replica replays it instead. Each measure says which it was.
 scenario_large_dataset() {
   local master replica started write_timeout
   k delete pod dataset --ignore-not-found >/dev/null
@@ -690,14 +692,14 @@ EOF
   k delete pod "$(pod_name "$replica")" --force --grace-period=0 >/dev/null 2>&1
   started=$SECONDS
   wait_healthy_within "$LARGE_DATASET_TIMEOUT_SECONDS"
-  printf '    large_dataset: a replica that lost its volume was back in sync after %ss\n' \
-    $((SECONDS - started))
+  printf '    large_dataset: a replica that lost its volume was back in sync after %ss, by %s\n' \
+    $((SECONDS - started)) "$(resync_path "$replica")"
 
   k delete pod "$(pod_name "$replica")" >/dev/null
   started=$SECONDS
   wait_healthy_within "$LARGE_DATASET_TIMEOUT_SECONDS"
-  printf '    large_dataset: a replica restarted on its full volume was back in sync after %ss\n' \
-    $((SECONDS - started))
+  printf '    large_dataset: a replica restarted on its full volume was back in sync after %ss, by %s\n' \
+    $((SECONDS - started)) "$(resync_path "$replica")"
   print_disk_usage
 }
 

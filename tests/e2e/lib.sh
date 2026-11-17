@@ -474,6 +474,16 @@ pod_full_syncs() { # $1: ordinal
   k logs "$(pod_name "$1")" -c kvrocks 2>/dev/null | grep -c 'fullsync was finish' || true
 }
 
+# How the running Kvrocks container of a replica caught up with its master: by copying its
+# files, or by replaying its write-ahead log, from the first write when the replica was empty.
+resync_path() { # $1: ordinal
+  if [ "$(pod_full_syncs "$1")" -ge 1 ]; then
+    printf 'a full sync'
+  else
+    printf 'replaying the write-ahead log of the master'
+  fi
+}
+
 count_full_syncs() {
   local ordinal total=0
   for ordinal in $(ordinals); do
