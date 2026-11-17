@@ -23,6 +23,37 @@ stop_fence() {
   wait "$FENCE_PID" 2>/dev/null || true
 }
 
+# The node of the master is cut off, cluster DNS included: no lookup and no peer answers,
+# and each of them costs the fencing loop a full timeout.
+isolate_from() { # the addresses of the peers
+  touch "$WORLD/dns-down"
+  for address in "$@"; do
+    hang "$address:26379"
+    hang "$address:6379"
+  done
+}
+
+# Records every pause Kvrocks is asked for, as "<when, in ms> <for how long, in ms>".
+record_pauses() {
+  handler localhost:6379 "client pause" <<'HANDLER'
+echo "$(date +%s%3N) $3" >>"$WORLD/pauses"
+echo OK
+HANDLER
+}
+
+pauses() {
+  cat "$WORLD/pauses" 2>/dev/null
+}
+
+# Writes go through whenever a pause runs out before the next one starts.
+assert_no_gap_between_pauses() {
+  [ "$(pauses | wc -l)" -ge 2 ] || fail "the pause was not renewed; pauses were:
+$(pauses | sed 's/^/      /')"
+  pauses | awk 'NR > 1 && $1 - started >= lasts { exit 1 } { started = $1; lasts = $2 }' ||
+    fail "a pause ran out before the next one started; pauses were (when, how long, in ms):
+$(pauses | sed 's/^/      /')"
+}
+
 test_a_confirmed_master_is_never_paused() {
   healthy_master
   start_fence
@@ -40,6 +71,34 @@ test_a_master_cut_off_from_its_peers_is_paused() {
   sleep 4
   stop_fence
   assert_called "localhost:6379 client pause 10000 write"
+}
+
+test_a_pause_is_renewed_before_it_runs_out() {
+  healthy_master
+  record_pauses
+  start_fence
+  sleep 2
+  isolate_from 10.0.0.1 10.0.0.2
+  sleep 10
+  stop_fence
+  assert_no_gap_between_pauses
+}
+
+# Every peer adds lookups and probes that time out: the checks must not slow down with them.
+test_a_pause_is_renewed_before_it_runs_out_with_five_pods() {
+  export KVROCKS_REPLICAS=5 SENTINEL_MAJORITY=3
+  healthy_master
+  dns kv-3.h 10.0.0.3
+  dns kv-4.h 10.0.0.4
+  sentinel_names 10.0.0.3 kv-0.h 1
+  sentinel_names 10.0.0.4 kv-0.h 1
+  record_pauses
+  start_fence
+  sleep 2
+  isolate_from 10.0.0.1 10.0.0.2 10.0.0.3 10.0.0.4
+  sleep 10
+  stop_fence
+  assert_no_gap_between_pauses
 }
 
 test_a_master_never_confirmed_is_not_paused() {
