@@ -525,7 +525,7 @@ scenario_network_policy() {
 # The migration path from a standalone Kvrocks: its data sits on the volume that pod 0 of a
 # new release claims, and the replicas copy it from there.
 scenario_install_from_existing_data() {
-  local ns="$NAMESPACE-seed" seed_release=seed seed_fullname=seed-kvrocks ordinal found
+  local ns="$NAMESPACE-seed" seed_release=seed seed_fullname=seed-kvrocks ordinal found acked
   kubectl create namespace "$ns" >/dev/null
   kubectl -n "$ns" apply -f - >/dev/null <<EOF
 apiVersion: v1
@@ -550,6 +550,12 @@ spec:
     - name: kvrocks
       image: $(kvrocks_image)
       command: ["sh", "-c", "printf 'bind 0.0.0.0\\nport 6379\\ndir /var/lib/kvrocks\\n' >/tmp/kvrocks.conf && exec kvrocks -c /tmp/kvrocks.conf"]
+      # Ready once Kvrocks answers, not as soon as the container starts: on a busy node, the
+      # first writes of the seed were refused.
+      readinessProbe:
+        exec:
+          command: ["sh", "-c", "MALLOC_CONF= redis-cli ping | grep -q PONG"]
+        periodSeconds: 1
       volumeMounts:
         - name: data
           mountPath: /var/lib/kvrocks
@@ -560,8 +566,10 @@ spec:
 EOF
   kubectl -n "$ns" wait --for=condition=Ready pod/standalone --timeout=180s >/dev/null ||
     fail "install_from_existing_data: the standalone Kvrocks did not start"
-  kubectl -n "$ns" exec standalone -- sh -c \
-    "seq 1 $OUTAGE_KEYS | sed 's/.*/SET seed-$RUN_ID:& &/' | MALLOC_CONF= redis-cli >/dev/null"
+  acked=$(kubectl -n "$ns" exec standalone -- sh -c \
+    "seq 1 $OUTAGE_KEYS | sed 's/.*/SET seed-$RUN_ID:& &/' | MALLOC_CONF= redis-cli | grep -c '^OK$' || true")
+  [ "$acked" = "$OUTAGE_KEYS" ] ||
+    fail "install_from_existing_data: only $acked of the $OUTAGE_KEYS seed writes were acknowledged"
   kubectl -n "$ns" delete pod standalone --wait=true >/dev/null
 
   helm install "$seed_release" "$REPO_ROOT/helm/kvrocks" --namespace "$ns" \
@@ -570,7 +578,7 @@ EOF
     fail "install_from_existing_data: the pods did not become ready"
   for ordinal in $(ordinals); do
     found=$(kubectl -n "$ns" exec "$seed_fullname-$ordinal" -c kvrocks -- sh -c \
-      ". /scripts/common.sh; seq 1 $OUTAGE_KEYS | sed 's/.*/EXISTS seed-$RUN_ID:&/' | redis-cli -p 6379 | grep -c '^1'")
+      ". /scripts/common.sh; seq 1 $OUTAGE_KEYS | sed 's/.*/EXISTS seed-$RUN_ID:&/' | MALLOC_CONF= redis-cli -p 6379 | grep -c '^1'")
     [ "$found" = "$OUTAGE_KEYS" ] ||
       fail "install_from_existing_data: pod $ordinal holds $found of the $OUTAGE_KEYS keys"
   done
