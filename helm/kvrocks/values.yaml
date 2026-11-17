@@ -248,11 +248,12 @@ switchover:
   pauseMilliseconds: 5000 # @schema minimum:4000
 
 fencing:
-  # -- Pauses the writes of a master that a majority of Sentinels no longer confirms, as
-  # when it is cut off from its peers. Kvrocks has no min-replicas-to-write: without
-  # fencing, connections already open to such a master keep writing to it until the
-  # partition heals, and all those writes are lost. The cost: a healthy master also stops
-  # taking writes when two Sentinels out of three are down, as HAProxy already does.
+  # -- Pauses the writes of a master that neither a majority of Sentinels nor its replicas
+  # follow any more, as when it is cut off from its peers. Kvrocks has no
+  # min-replicas-to-write: without fencing, connections already open to such a master keep
+  # writing to it until the partition heals, and all those writes are lost. The cost: a
+  # healthy master also stops taking writes when it is left without a majority of the pods,
+  # two down out of three for instance, as HAProxy already does.
   enabled: true
   # -- Resources of the fencing sidecar.
   resources: {} # @schema additionalProperties:true
