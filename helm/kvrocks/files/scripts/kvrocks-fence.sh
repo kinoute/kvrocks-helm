@@ -52,20 +52,23 @@ resolve() { # $1: hostname. Prints its address, or nothing.
   timeout "$PROBE_TIMEOUT_SECONDS" getent hosts "$1" 2>/dev/null | awk 'NR == 1 { print $1 }'
 }
 
-# Keeps the last address of a peer that no longer resolves.
+# Keeps the last address of a peer that no longer resolves. All are looked up at the same
+# time: during a DNS outage each lookup costs a full timeout, and one after the other they
+# would slow the checks down with every pod added.
 refresh_peer_addresses() {
-  local fqdn address refreshed=""
-  for fqdn in $(peer_fqdns); do
-    address=$(resolve "$fqdn")
-    if [ -z "$address" ]; then
-      address=$(printf '%s\n' "$peer_addresses" | awk -v fqdn="$fqdn" '$1 == fqdn { print $2 }')
-    fi
-    if [ -n "$address" ]; then
-      refreshed="$refreshed$fqdn $address
-"
-    fi
-  done
-  peer_addresses=$refreshed
+  local fqdn
+  peer_addresses=$(
+    for fqdn in $(peer_fqdns); do
+      (
+        address=$(resolve "$fqdn")
+        if [ -z "$address" ]; then
+          address=$(printf '%s\n' "$peer_addresses" | awk -v fqdn="$fqdn" '$1 == fqdn { print $2 }')
+        fi
+        [ -z "$address" ] || printf '%s %s\n' "$fqdn" "$address"
+      ) &
+    done
+    wait
+  )
 }
 
 # One line per Sentinel that names this pod as master ("sentinel"), and per replica with a
