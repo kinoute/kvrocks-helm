@@ -39,7 +39,7 @@ test_a_master_cut_off_from_its_peers_is_paused() {
   down 10.0.0.2:26379
   sleep 4
   stop_fence
-  assert_called "localhost:6379 client pause 3000 write"
+  assert_called "localhost:6379 client pause 10000 write"
 }
 
 test_a_master_never_confirmed_is_not_paused() {

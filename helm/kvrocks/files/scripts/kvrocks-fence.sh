@@ -32,9 +32,13 @@ PROBE_TIMEOUT_SECONDS=0.5
 # How long a master may go without a majority before its writes are paused: a single slow
 # answer must not stop a healthy master.
 FENCE_AFTER_MS=2000
-# Each pause outlasts a few checks and is renewed at every check while fenced. If this
-# container dies, writes come back on their own.
-FENCE_PAUSE_MS=3000
+# A pause is renewed at every check while fenced, and must outlast the slowest of them, or
+# writes go through in between. A check takes up to 8.5 s: every lookup and every peer that
+# times out, then a Kvrocks that needs its whole CLI_TIMEOUT_SECONDS to give its role, and
+# again to take the pause. A long pause costs nothing when the cluster follows this pod
+# again, since it is then lifted at once. If this container dies, writes come back on
+# their own when it runs out.
+FENCE_PAUSE_MS=10000
 
 fenced=no
 # When the cluster last followed this pod as master; empty if never since it became one.
