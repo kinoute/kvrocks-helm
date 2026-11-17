@@ -192,6 +192,14 @@ tests:
           path: data["haproxy.cfg"]
           pattern: '(?m)^  server sentinel_0 \S+ check inter 1s fall 1 rise 1$'
 
+  # HAProxy takes a server for up until a check fails: at startup every Sentinel would vote
+  # for every pod, and writes would go to pod 0 whatever its role.
+  - it: takes no Sentinel vote and no Kvrocks for granted before their first check
+    asserts:
+      - matchRegex:
+          path: data["haproxy.cfg"]
+          pattern: 'defaults\n(  .*\n)*?  default-server .* init-state down\n'
+
   # --- Routing ---
 
   - it: routes writes to the pod that a quorum of Sentinels names as master
