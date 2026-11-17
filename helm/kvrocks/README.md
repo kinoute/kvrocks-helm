@@ -60,7 +60,7 @@ For a release named `db`, with the default ports:
 | auth.secretKey | string | `"password"` | Key of the password in the Secret. |
 | clusterDomain | string | `"cluster.local"` | DNS domain of the cluster, used to build the pods' fully qualified names. |
 | commonLabels | object | `{}` | Labels added to every resource. |
-| config | object | `{"use-rsid-psync":"yes"}` | Extra `kvrocks.conf` settings, as `key: value`. Settings the chart owns (bind, port, dir, the password, the replication role...) are rejected, and so are `rename-command`, which would hide from the chart's scripts the commands they rely on, and the namespace tokens, which are credentials. |
+| config | object | `{"use-rsid-psync":"yes"}` | Extra `kvrocks.conf` settings, as `key: value`. Settings the chart owns (bind, port, dir, the password, the replication role and priority...) are rejected, and so are `rename-command`, which would hide from the chart's scripts the commands they rely on, and the namespace tokens, which are credentials. |
 | containerSecurityContext | object | `{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true}` | Security context of every container of the Kvrocks pods. |
 | fencing.enabled | bool | `true` | Pauses the writes of a master that a majority of Sentinels no longer confirms, as when it is cut off from its peers. Kvrocks has no min-replicas-to-write: without fencing, connections already open to such a master keep writing to it until the partition heals, and all those writes are lost. The cost: a healthy master also stops taking writes when two Sentinels out of three are down, as HAProxy already does. |
 | fencing.resources | object | `{}` | Resources of the fencing sidecar. |

@@ -156,10 +156,13 @@ large integer as 2.68e+08; an unquoted YAML yes/no arrives as a boolean.
 {{/*
 Settings the chart writes itself; letting `config` override them would break the topology.
 And rename-command, which would hide from the chart's scripts the commands they rely on: with
-CLIENT renamed, the fencing could no longer pause the writes of an isolated master.
+CLIENT renamed, the fencing could no longer pause the writes of an isolated master. And the
+two settings of a replica the failover relies on, which `config` would set on every pod at
+once: replicas that take writes drift from their master, and with a priority of 0 Sentinel
+can promote none of them, so none is ever ready.
 */}}
 {{- define "kvrocks.reservedConfigKeys" -}}
-bind port dir pidfile log-dir daemonize cluster-enabled requirepass masterauth slaveof replicaof replica-announce-ip replica-announce-port tls-port tls-cert-file tls-key-file tls-ca-cert-file tls-auth-clients tls-protocols tls-replication rename-command
+bind port dir pidfile log-dir daemonize cluster-enabled requirepass masterauth slaveof replicaof replica-announce-ip replica-announce-port tls-port tls-cert-file tls-key-file tls-ca-cert-file tls-auth-clients tls-protocols tls-replication rename-command slave-read-only slave-priority
 {{- end }}
 
 {{/* Fails the render on values that would produce a broken or unsafe deployment. */}}

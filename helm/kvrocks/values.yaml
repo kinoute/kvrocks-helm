@@ -79,9 +79,9 @@ tls:
   reloader: false
 
 # -- Extra `kvrocks.conf` settings, as `key: value`. Settings the chart owns (bind, port,
-# dir, the password, the replication role...) are rejected, and so are `rename-command`,
-# which would hide from the chart's scripts the commands they rely on, and the namespace
-# tokens, which are credentials.
+# dir, the password, the replication role and priority...) are rejected, and so are
+# `rename-command`, which would hide from the chart's scripts the commands they rely on,
+# and the namespace tokens, which are credentials.
 config: # @schema additionalProperties:true
   # Without this, a former master that comes back with unreplicated writes can resume
   # replication from its sequence number alone and silently diverge from the new master.
