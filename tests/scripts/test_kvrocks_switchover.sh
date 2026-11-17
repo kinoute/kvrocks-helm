@@ -207,6 +207,36 @@ test_a_pause_of_the_fencing_that_ran_out_does_not_hold_writes() {
   assert_called "localhost:6379 client unpause"
 }
 
+wait_until() { # $1: a condition, as shell code. Fails after 10 s.
+  tries=0
+  until eval "$1"; do
+    tries=$((tries + 1))
+    [ "$tries" -lt 100 ] || fail "still waiting for: $1"
+    sleep 0.1
+  done
+}
+
+test_a_lost_session_after_the_failover_does_not_stop_the_handover() {
+  cluster_ready
+  # Accepted, and the new master comes later.
+  reply localhost:26379 "sentinel failover kvrocks" "OK"
+  /scripts/kvrocks-switchover.sh >"$WORLD/out" 2>&1 &
+  pid=$!
+  wait_until 'calls | grep -q "sentinel failover"'
+  failover=$(line_of "sentinel failover")
+  # The first pause renewed after the request: the script waits for the new master.
+  wait_until "calls | tail -n +$((failover + 1)) | grep -q 'client pause'"
+  kill -HUP "$pid"
+  kill -TERM "$pid"
+  for sentinel in localhost kv-1.h kv-2.h; do
+    sentinel_names "$sentinel" kv-1.h 2
+  done
+  STATUS=0
+  wait "$pid" || STATUS=$?
+  assert_eq 0 "$STATUS" "exit status"
+  assert_called "localhost:6379 slaveof kv-1.h 6379"
+}
+
 # The failover request gets no answer within the script's timeout.
 hang_failover_request() {
   handler localhost:26379 "sentinel failover kvrocks" <<'HANDLER'
@@ -276,6 +306,40 @@ test_to_restores_the_priority_when_the_handover_gives_up() {
   assert_not_called "sentinel failover"
   assert_called "localhost:6379 client unpause"
   assert_called "kv-2.h:6379 config set slave-priority 100"
+}
+
+test_to_a_lost_session_before_the_failover_gives_everything_back() {
+  steered_cluster_ready
+  # kv-1 is behind: the script waits for it, writes paused.
+  kvrocks_replica kv-1.h kv-0.h 50
+  /scripts/kvrocks-switchover.sh --to kv-2 >"$WORLD/out" 2>&1 &
+  pid=$!
+  wait_until 'calls | grep -q "localhost:6379 client pause"'
+  kill -HUP "$pid"
+  STATUS=0
+  wait "$pid" || STATUS=$?
+  assert_eq 1 "$STATUS" "exit status"
+  assert_not_called "sentinel failover"
+  assert_called "localhost:6379 client unpause"
+  assert_called "kv-2.h:6379 config set slave-priority 100"
+}
+
+test_to_warns_when_the_priority_cannot_be_given_back() {
+  steered_cluster_ready
+  # kv-2 takes the lowest priority, then refuses its old one.
+  mv "$WORLD/kv-2.h:6379/config_set_slave-priority" "$WORLD/steer"
+  handler kv-2.h:6379 "config set slave-priority" <<'HANDLER'
+if [ "$4" != 1 ]; then
+  echo "ERR unavailable"
+  exit 0
+fi
+exec sh "$WORLD/steer" "$@"
+HANDLER
+  switchover --to kv-2
+  assert_eq 0 "$STATUS" "exit status"
+  grep -q 'WARNING: could not give kv-2.h its priority 100 back' "$WORLD/out" ||
+    fail "no warning; output was:
+$(cat "$WORLD/out")"
 }
 
 test_to_the_master_itself_changes_nothing() {
