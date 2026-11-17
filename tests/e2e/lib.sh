@@ -565,6 +565,15 @@ restore_cluster_dns() {
   COREDNS_REPLICAS=""
 }
 
+# Uninstalls the release and deletes its volumes: the next install starts from nothing.
+remove_release() {
+  local ordinal
+  helm uninstall "$RELEASE" --namespace "$NAMESPACE" --wait >/dev/null
+  for ordinal in $(ordinals); do
+    k delete pvc "data-$(pod_name "$ordinal")" --ignore-not-found --wait=true >/dev/null
+  done
+}
+
 # The Kvrocks image the chart deploys.
 kvrocks_image() {
   helm template "$RELEASE" "$REPO_ROOT/helm/kvrocks" --values "$E2E_DIR/values.yaml" |

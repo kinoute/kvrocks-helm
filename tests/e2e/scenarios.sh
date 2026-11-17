@@ -204,10 +204,7 @@ scenario_node_upgrade() {
 scenario_kvrocks_upgrade() {
   local target_version ordinal version report
   target_version=$(kvrocks_image | sed 's/.*://')
-  helm uninstall "$RELEASE" --namespace "$NAMESPACE" --wait >/dev/null
-  for ordinal in $(ordinals); do
-    k delete pvc "data-$(pod_name "$ordinal")" --ignore-not-found --wait=true >/dev/null
-  done
+  remove_release
   helm install "$RELEASE" "$REPO_ROOT/helm/kvrocks" --namespace "$NAMESPACE" \
     "${HELM_VALUES[@]}" --set "image.tag=$KVROCKS_UPGRADE_FROM" >/dev/null
   k rollout status "statefulset/$FULLNAME" --timeout=600s >/dev/null ||
