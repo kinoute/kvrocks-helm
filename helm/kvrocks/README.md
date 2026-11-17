@@ -164,7 +164,7 @@ For a release named `db`, with the default ports:
 | tls.clientSecret | string | `""` | Secret of type `kubernetes.io/tls` with a client certificate signed by the CA, used by `helm test`. Without it and with `authClients`, `helm test` has nothing to run. |
 | tls.enabled | bool | `false` | Serves clients over TLS on `port`. Replication, Sentinel, the probes and the exporter stay in clear on `tls.internalPort`, which a NetworkPolicy then closes to every pod outside the release. |
 | tls.existingSecret | string | `""` | Secret of type `kubernetes.io/tls` with the server certificate (`tls.crt`, `tls.key`). It must cover the names clients connect to, such as the write Service. |
-| tls.internalPort | int | `6666` | Port in clear for the traffic inside the release: Kvrocks cannot turn its plain port off. |
+| tls.internalPort | int | `6666` | Port in clear for the traffic inside the release: Kvrocks cannot turn its plain port off. On a release already installed, it must stay the port the pods already use: see TLS in the README of the repository. |
 | tls.protocols | string | `"TLSv1.3"` | TLS versions Kvrocks accepts. |
 | tls.reloader | bool | `false` | Annotates the StatefulSet so that Reloader restarts it, one handover at a time, when the certificate Secrets change. |
 | tolerations | list | `[]` | Tolerations of the Kvrocks pods. |

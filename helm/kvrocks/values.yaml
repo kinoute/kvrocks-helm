@@ -55,7 +55,8 @@ tls:
   # outside the release.
   enabled: false
   # -- Port in clear for the traffic inside the release: Kvrocks cannot turn its plain
-  # port off.
+  # port off. On a release already installed, it must stay the port the pods already use:
+  # see TLS in the README of the repository.
   internalPort: 6666 # @schema minimum:1;maximum:65535
   # -- Secret of type `kubernetes.io/tls` with the server certificate (`tls.crt`, `tls.key`).
   # It must cover the names clients connect to, such as the write Service.

@@ -83,7 +83,7 @@ As of 2026-11-16 the chart is not published to a registry yet, so it installs fr
    helm test db
    ```
 
-**Important:** pick `replicaCount` and the password before you install. Changing either afterwards is not handled by the chart, see [Caveats](#caveats).
+**Important:** pick `replicaCount` and the password before you install. Changing either afterwards is not handled by the chart, see [Caveats](#caveats). TLS can be turned on later, but not on its default ports, see [TLS](#tls).
 
 Requirements:
 
@@ -138,11 +138,19 @@ tls:
 - **The server certificate must cover the names clients use**: `db-kvrocks` and `db-kvrocks-read`, in their short and `.<namespace>.svc.cluster.local` forms, plus any name used from outside the cluster. HAProxy passes the TLS connection through without opening it, so clients see the certificate of Kvrocks whichever endpoint they use. Most clients check the name: one that connects to a given pod needs `*.db-kvrocks-headless.<namespace>.svc.cluster.local` as well. The `serverAuth` usage is enough.
 - **Python 3.13 and later verify strictly.** They refuse, with `certificate verify failed`, a certificate without an Authority Key Identifier or a CA without a key usage. A company PKI usually sets both, a quick `openssl` one-liner often does not. `openssl verify -x509_strict -CAfile ca.crt tls.crt` tells beforehand.
 - **The port in clear cannot be closed.** Kvrocks always listens in clear as well, so the chart moves that port to `tls.internalPort` and installs a NetworkPolicy, even with `networkPolicy.enabled: false`, that opens it to the pods of the release only. This needs a network plugin that enforces NetworkPolicy. Without one, the port stays reachable from the cluster, behind the password.
+- **On a release already installed, the port in clear must not move.** The pods find each other on it. With the defaults, turning TLS on gives 6379 to TLS and moves the pods to 6666: the first pod the rolling update restarts looks for its master there, where no other pod listens yet, never becomes ready, and the update stops. Keep the port the pods already use as `tls.internalPort` and give TLS another one, as below. `port` is the port of the pods: the Services keep theirs (`service.port`, `readService.port`), so clients keep their address and only switch to TLS. The rolling update then goes as any other. Moving the port in clear of a running release, to go back to the default ports for instance, is not handled by the chart.
+
+  ```yaml
+  port: 6380 # TLS, on the pods: the Services still answer on 6379
+  tls:
+    enabled: true
+    internalPort: 6379 # the pods stay where they already find each other
+  ```
 - **Sentinel is not available to clients.** It speaks in clear, so the same NetworkPolicy keeps it inside the release. Clients go through the write endpoint.
 - **Renewing a certificate restarts the pods.** Kvrocks does not notice that its files changed. With `tls.reloader: true`, the StatefulSet carries the annotation of [Reloader](https://github.com/stakater/Reloader), which rolls the pods when either Secret changes. A rolling update hands the master over without losing a write. Without Reloader, run `kubectl rollout restart statefulset/db-kvrocks` after the renewal.
 - **`helm test` needs a client certificate** under `tls.authClients`: a `kubernetes.io/tls` Secret named in `tls.clientSecret`. Without it, the test is not installed.
 
-The scenario `tls_clients` checks that a client with a certificate from the CA gets in, and that clients without a certificate, with a certificate from another CA, in clear, or on the port in clear from outside the release do not. Every other scenario runs with TLS on too, except in `make e2e-quick`.
+The scenario `tls_clients` checks that a client with a certificate from the CA gets in, and that clients without a certificate, with a certificate from another CA, in clear, or on the port in clear from outside the release do not. Every other scenario runs with TLS on too, except in `make e2e-quick`. The scenario `tls_enabled_later` turns TLS on that way for a release that runs without it and holds data: the rolling update must finish, no replica may copy the database again, and every key must still be on every pod.
 
 ### Moving the master before maintenance
 
