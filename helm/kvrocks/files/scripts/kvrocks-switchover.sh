@@ -168,13 +168,24 @@ release_writes() {
   fi
 }
 
+# Left with the lowest priority, the target would be promoted first at any failover, even
+# far behind the others, until it restarts.
+restore_target_priority() {
+  if [ "$(kv_cli "$target" config set slave-priority "$target_priority")" != "OK" ]; then
+    log "WARNING: could not give $target its priority $target_priority back: until it restarts, Sentinel promotes it first at any failover, even behind; run CONFIG SET slave-priority $target_priority on it, or restart it"
+    return 0
+  fi
+  kv_cli "$target" config rewrite >/dev/null || true
+}
+
 cleanup() {
+  # A second signal must not cut the cleanup short.
+  trap '' INT TERM HUP PIPE
   if [ "$writes_held" = yes ]; then
     release_writes
   fi
   if [ -n "$target_priority" ]; then
-    kv_cli "$target" config set slave-priority "$target_priority" >/dev/null || true
-    kv_cli "$target" config rewrite >/dev/null || true
+    restore_target_priority
   fi
 }
 
@@ -259,6 +270,9 @@ give_up() { # $1: why. The EXIT trap releases the writes, unless the pod is stop
 }
 
 trap cleanup EXIT
+# Ctrl-C, a kill, or a kubectl session that is lost: until Sentinel accepts the failover,
+# stopping is safe, and the EXIT trap gives back the writes and the target's priority.
+trap 'exit 1' INT TERM HUP PIPE
 
 case "$(kv_role localhost)" in
   slave)
@@ -334,8 +348,10 @@ case "$reply" in
   *) give_up "Sentinel refused the failover: $reply" ;;
 esac
 
-# Past this point there is no giving up: see wait_for_new_master.
+# Past this point there is no giving up: see wait_for_new_master. Nor any stopping on a
+# signal: until this pod steps down, it would take writes the new master never gets.
 writes_held=no
+trap '' INT TERM HUP PIPE
 if ! new_master=$(wait_for_new_master "$epoch_before"); then
   log "Sentinel abandoned the failover, this pod stays master"
   release_writes

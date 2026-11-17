@@ -13,8 +13,9 @@ if [ -n "${KVROCKS_PASSWORD:-}" ]; then
   export REDISCLI_AUTH="$KVROCKS_PASSWORD"
 fi
 
+# Never fails: a handover whose kubectl session is gone must go on, not stop on a log line.
 log() {
-  printf '%s [%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${SCRIPT_NAME:-kvrocks}" "$*" >&2
+  printf '%s [%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${SCRIPT_NAME:-kvrocks}" "$*" >&2 || true
 }
 
 now_ms() {
