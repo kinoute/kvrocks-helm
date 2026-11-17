@@ -71,6 +71,21 @@ tests:
             app.kubernetes.io/instance: db
             app.kubernetes.io/component: kvrocks
 
+  - it: labels its pods with nothing that changes with the chart version
+    template: statefulset.yaml
+    set:
+      commonLabels.team: data
+      podLabels.tier: cache
+    asserts:
+      - equal:
+          path: spec.template.metadata.labels
+          value:
+            app.kubernetes.io/name: kvrocks
+            app.kubernetes.io/instance: db
+            app.kubernetes.io/component: kvrocks
+            team: data
+            tier: cache
+
   # --- Containers ---
 
   - it: runs kvrocks and metrics as containers in replication mode

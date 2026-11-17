@@ -1,6 +1,6 @@
 CHART := helm/kvrocks
 SCRIPTS := $(CHART)/files/scripts/*.sh tests/e2e/*.sh tests/prometheus/run.sh \
-	tests/scripts/run.sh tests/scripts/harness.sh tests/scripts/fake/*
+	tests/scripts/run.sh tests/scripts/harness.sh tests/scripts/fake/* tests/chart/*.sh
 LOADGEN := tests/e2e/loadgen
 
 # Every optional resource switched on, so that the schemas of all of them are checked.
@@ -45,8 +45,9 @@ manifests: ## Rendered manifests against the Kubernetes and Prometheus Operator 
 	$(RENDER) --set architecture=standalone | $(KUBECONFORM)
 	$(RENDER) $(ALL_FEATURES) $(TLS) | $(KUBECONFORM)
 
-unit: ## helm-unittest suites
+unit: ## helm-unittest suites, and pod templates that a new chart version leaves as they are
 	helm unittest $(CHART)
+	tests/chart/pod-templates.sh
 
 scripts: ## Unit tests of the pod scripts against a fake redis-cli, in their own images (needs docker)
 	tests/scripts/run.sh

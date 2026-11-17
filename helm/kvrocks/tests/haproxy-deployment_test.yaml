@@ -82,6 +82,21 @@ tests:
             app.kubernetes.io/instance: db
             app.kubernetes.io/component: haproxy
 
+  - it: labels its pods with nothing that changes with the chart version
+    template: haproxy/deployment.yaml
+    set:
+      commonLabels.team: data
+      haproxy.podLabels.tier: cache
+    asserts:
+      - equal:
+          path: spec.template.metadata.labels
+          value:
+            app.kubernetes.io/name: kvrocks
+            app.kubernetes.io/instance: db
+            app.kubernetes.io/component: haproxy
+            team: data
+            tier: cache
+
   - it: annotates the pods with a checksum of haproxy.cfg
     template: haproxy/deployment.yaml
     asserts:
