@@ -181,18 +181,23 @@ cleanup() {
 # Sentinel has accepted the failover: a new master is on its way, however long it takes.
 # Writes stay held all along, because any write accepted here from now on would be lost.
 # Sentinel gives up after its failover timeout; only then is this pod still the master.
-wait_for_new_master() { # prints the new master
-  local master host deadline
+# Only a view of a later epoch than the one before the request names the master this
+# failover promotes: a Sentinel that missed earlier failovers may still name an older one.
+wait_for_new_master() { # $1: config epoch before the request. Prints the new master.
+  local view master host deadline
   deadline=$(($(now_ms) + SENTINEL_FAILOVER_TIMEOUT_MS))
   while [ "$(now_ms)" -lt "$deadline" ]; do
     pause_writes || true
     for host in localhost $(peer_fqdns); do
       # Short timeouts: an unreachable Sentinel must not outlast the write pause.
-      master=$(
+      view=$(
         CLI_TIMEOUT_SECONDS=$PROBE_TIMEOUT_SECONDS
-        sentinel_master "$host"
+        sentinel_view "$host"
       )
-      if [ -n "$master" ] && [ "$master" != "$(self_fqdn)" ]; then
+      [ -n "$view" ] || continue
+      [ "$(view_epoch "$view")" -gt "$1" ] || continue
+      master=$(view_master "$view")
+      if [ "$master" != "$(self_fqdn)" ]; then
         printf '%s\n' "$master"
         return 0
       fi
@@ -279,6 +284,11 @@ if ! sentinel=$(pick_sentinel); then
   log "no Sentinel names this pod as master, nothing to hand over"
   exit 1
 fi
+epoch_before=$(sentinel_epoch "$sentinel")
+if [ -z "$epoch_before" ]; then
+  log "Sentinel does not give its config epoch, no handover"
+  exit 1
+fi
 candidates=$(promotion_candidates "$sentinel")
 if [ -z "$candidates" ]; then
   log "Sentinel has no replica it could promote, nothing to hand over to"
@@ -313,6 +323,8 @@ reply=$(
 ) || true
 case "$reply" in
   OK) ;;
+  # This Sentinel runs a failover of this master already: a new master is on its way too.
+  INPROG*) log "Sentinel is failing this master over already" ;;
   "")
     log "Sentinel did not answer the failover request in time"
     if ! failover_started "$sentinel" "$((started + SWITCHOVER_PAUSE_MS))"; then
@@ -324,7 +336,7 @@ esac
 
 # Past this point there is no giving up: see wait_for_new_master.
 writes_held=no
-if ! new_master=$(wait_for_new_master); then
+if ! new_master=$(wait_for_new_master "$epoch_before"); then
   log "Sentinel abandoned the failover, this pod stays master"
   release_writes
   exit 1
