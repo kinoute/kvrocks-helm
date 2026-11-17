@@ -34,7 +34,7 @@ flowchart LR
 
 - A StatefulSet of 3 pods. Each pod runs Kvrocks and `kvrocks_exporter`, with two sidecars: a Sentinel (the Valkey image) and a small fencing loop.
 - HAProxy is the write endpoint. It sends writes to the pod that a majority of Sentinels names as master and actually reaches, with a reply to their pings in the last 2 s, and only if that pod also reports itself as master. With no such majority it refuses connections rather than guess.
-- The fencing loop pauses the writes of a master that a majority of Sentinels no longer confirms, as when it is cut off from the other pods. Kvrocks has no `min-replicas-to-write`, and without this the connections already open to such a master would keep writing to it until the partition heals. Those writes are lost when it rejoins as a replica. It reaches the other Sentinels by their last known address, so that a cluster DNS outage does not make it pause a healthy master.
+- The fencing loop pauses the writes of a master that neither a majority of Sentinels nor its replicas follow any more, as when it is cut off from the other pods. Kvrocks has no `min-replicas-to-write`, and without this the connections already open to such a master would keep writing to it until the partition heals. Those writes are lost when it rejoins as a replica. It reaches the other Sentinels by their last known address, so that a cluster DNS outage does not make it pause a healthy master.
 - Everything goes by pod hostnames, never by IP: pod IPs change on every restart.
 - `sentinel.conf` and a writable copy of `kvrocks.conf` live on the data volume. The role of a pod never comes from a ConfigMap, because Sentinel rewrites it at every failover.
 - Sentinel and the fencing loop are native sidecars, hence Kubernetes 1.29 or later: Kubernetes only stops them once Kvrocks has exited, so they are still there while the master hands its role over.
@@ -116,7 +116,7 @@ Every value is listed with its default in the [chart's README](helm/kvrocks/READ
 | `podAntiAffinity` | `hard` | `soft` lets two Kvrocks pods share a node, for clusters with fewer nodes than pods |
 | `config` | `use-rsid-psync: "yes"` | Extra `kvrocks.conf` settings |
 | `sentinel.downAfterMilliseconds` | `10000` | How long a master must be unreachable before Sentinel fails over |
-| `fencing.enabled` | `true` | Pauses the writes of a master that a majority of Sentinels no longer confirms |
+| `fencing.enabled` | `true` | Pauses the writes of a master that neither a majority of Sentinels nor its replicas follow any more |
 | `metrics.serviceMonitor.enabled` | `false` | Scrapes the exporters and HAProxy with the Prometheus Operator |
 | `metrics.prometheusRule.enabled` | `false` | Installs the alerts |
 | `networkPolicy.enabled` | `false` | Restricts who can reach the pods |
@@ -320,9 +320,9 @@ With data: `large_dataset` wrote 10 GiB shaped like a production workload, 30.4 
 ## Caveats
 
 - **Replication is asynchronous.** When the master crashes, the last writes it acknowledged and had not sent to a replica yet are lost.
-- **Fencing is not instant.** A master cut off from its peers keeps taking writes on the connections already open to it for about two seconds, the time the fencing loop waits before it concludes that no majority of Sentinels confirms it any more. Those writes are lost.
+- **Fencing is not instant.** A master cut off from its peers keeps taking writes on the connections already open to it for about two seconds, the time the fencing loop waits before it concludes that the other pods no longer follow it. Those writes are lost.
 - **A slow start can cost a full sync.** A pod picks its role before RocksDB opens. If opening a large database takes longer than `sentinel.downAfterMilliseconds`, Sentinel may fail over meanwhile, and the pod starts as a master nobody routes to. Sentinel then demotes it, and it copies the whole database again. No write is lost.
-- **Fencing has a cost.** A healthy master also stops taking writes when two Sentinels out of three are down. HAProxy already refuses new connections in that case.
+- **Fencing has a cost.** A healthy master also stops taking writes when it is left without a majority of the pods, as when two pods out of three are down. HAProxy already refuses new connections in that case. Sentinels that are down while the replicas still follow the master do not pause it.
 - **A rolling update can move the master several times.** Kubernetes restarts the pods from the highest ordinal down, and Sentinel may hand the role to the next pod to restart. Each move pauses writes for about 3 s without losing any, but a rolling update can take up to three of them.
 - **Password rotation is not automatic.** Changing the Secret restarts nothing, and pods that restart later with the new password can no longer talk to the others. Follow [Rotating the password](#rotating-the-password).
 - **Changing `replicaCount` is not handled.** Scaling down in particular can remove the pod that is the master.
