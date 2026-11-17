@@ -12,6 +12,8 @@ former_master() {
   reply localhost:6379 "client kill" "2"
   reply localhost:6379 "config rewrite" "OK"
   step_down_on_slaveof
+  # The Sentinel of the pod, which runs the script, names the new master before it starts it.
+  sentinel_names localhost kv-1.h 2
 }
 
 test_the_former_master_is_demoted_at_once() {
@@ -20,6 +22,23 @@ test_the_former_master_is_demoted_at_once() {
   assert_eq 0 "$STATUS" "exit status"
   assert_called "localhost:6379 slaveof kv-1.h 6379"
   assert_called "localhost:6379 client kill type normal"
+}
+
+test_a_run_replayed_after_a_later_failover_leaves_the_new_master_alone() {
+  former_master
+  # Since the failover this run was started for, another one made kv-0 the master again.
+  sentinel_names localhost kv-0.h 3
+  reconfig
+  assert_eq 0 "$STATUS" "exit status"
+  assert_not_called "slaveof"
+}
+
+test_a_sentinel_that_does_not_answer_does_not_hold_the_demotion_back() {
+  former_master
+  down localhost:26379
+  reconfig
+  assert_eq 0 "$STATUS" "exit status"
+  assert_called "localhost:6379 slaveof kv-1.h 6379"
 }
 
 test_nothing_to_do_in_the_pod_of_another_master() {
