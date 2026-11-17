@@ -680,6 +680,44 @@ scenario_tls_clients() {
   printf '    tls_clients: only clients with a certificate from the CA, over TLS, get in\n'
 }
 
+# TLS turned on for a release that runs without it, as the README says to: the port in clear
+# stays where the pods already find each other, and TLS gets a port of its own on the pods.
+# The Services keep theirs, so the clients keep their address. With the port in clear moved
+# instead, the first pod restarted would look for its master where no other pod listens
+# yet, never become ready, and stop the rolling update there.
+scenario_tls_enabled_later() {
+  local plain_port=6379 tls_port=6380
+  create_tls_secrets
+  # The client mounts the certificates when it starts, and may be older than they are.
+  k delete pod "$CLIENT_POD" --ignore-not-found >/dev/null
+  remove_release
+  helm install "$RELEASE" "$REPO_ROOT/helm/kvrocks" --namespace "$NAMESPACE" \
+    "${HELM_VALUES[@]}" --set tls.enabled=false >/dev/null
+  k rollout status "statefulset/$FULLNAME" --timeout=600s >/dev/null ||
+    fail "tls_enabled_later: the release without TLS did not start"
+  wait_healthy
+  E2E_TLS=0 write_keys tlslater "$OUTAGE_KEYS"
+
+  helm upgrade "$RELEASE" "$REPO_ROOT/helm/kvrocks" --namespace "$NAMESPACE" \
+    "${HELM_VALUES[@]}" --values "$E2E_DIR/values-tls.yaml" \
+    --set "port=$tls_port" --set "tls.internalPort=$plain_port" >/dev/null
+  k rollout status "statefulset/$FULLNAME" --timeout=600s >/dev/null ||
+    fail "tls_enabled_later: the rollout did not finish"
+  k rollout status "deployment/$FULLNAME-haproxy" --timeout=300s >/dev/null ||
+    fail "tls_enabled_later: the rollout of HAProxy did not finish"
+  wait_healthy
+  # Every container is new: any full sync they logged happened during this rollout.
+  [ "$(count_full_syncs)" = "0" ] ||
+    fail "tls_enabled_later: a replica copied the whole database again"
+  E2E_TLS=1 assert_keys_everywhere tls_enabled_later tlslater "$OUTAGE_KEYS"
+  E2E_TLS=1 INTERNAL_PORT=$plain_port scenario_tls_clients
+
+  # Back to the release the other scenarios expect. Its port in clear is another one, the
+  # very change a running release cannot take: it starts again from nothing.
+  remove_release
+  scenario_install
+}
+
 scenario_helm_test() {
   local output
   output=$(helm test "$RELEASE" --namespace "$NAMESPACE" 2>&1) || fail "helm_test: helm test failed"

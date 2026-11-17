@@ -39,6 +39,7 @@ ALL_SCENARIOS=(
   stale_master_starts_first
   empty_first_pod_after_outage
   tls_clients
+  tls_enabled_later
   network_policy
   install_from_existing_data
   standalone
@@ -50,6 +51,7 @@ ALL_SCENARIOS=(
 CLUSTER_SCENARIOS=(
   install
   tls_clients
+  tls_enabled_later
   switchover
   plain_sentinel_failover
   rolling_update

@@ -132,6 +132,30 @@ tests:
             name: KVROCKS_ADDR
             value: redis://localhost:6666
 
+  # TLS turned on for a release already installed: the pods must keep finding each other on
+  # the port they already use, so that port becomes the one in clear and TLS gets another.
+  - it: leaves the pods on their former port when TLS takes a new one
+    template: statefulset.yaml
+    set:
+      port: 6380
+      tls.internalPort: 6379
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].env
+          content:
+            name: KVROCKS_PORT
+            value: "6379"
+      - contains:
+          path: spec.template.spec.initContainers[?(@.name == "sentinel")].env
+          content:
+            name: KVROCKS_PORT
+            value: "6379"
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].ports
+          content:
+            name: kvrocks
+            containerPort: 6380
+
   - it: lets Reloader restart the pods when the certificate Secrets change
     template: statefulset.yaml
     set:
