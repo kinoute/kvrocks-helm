@@ -15,12 +15,27 @@ SCRIPT_NAME=sentinel-reconfig
 # Sentinel kills a script that runs longer than 60 s. Shorter in the unit tests.
 DEMOTE_TIMEOUT_SECONDS=${DEMOTE_TIMEOUT_SECONDS:-45}
 RETRY_SECONDS=1
+SENTINEL_TIMEOUT_SECONDS=1
 
 from_host=$4
 to_host=$6
 to_port=$7
 
 [ "$from_host" = "$(self_fqdn)" ] || exit 0
+
+# Sentinel replays a failed run with the arguments it was first given, up to minutes later.
+# By then another failover may have made this pod the master again, and demoting it would
+# leave the cluster without one. The Sentinel of this pod runs the script, and names the new
+# master before it starts it: if it names another pod by now, this run is out of date.
+# A Sentinel that does not answer proves nothing, and does not hold the demotion back.
+out_of_date() {
+  local master
+  master=$(
+    CLI_TIMEOUT_SECONDS=$SENTINEL_TIMEOUT_SECONDS
+    sentinel_master localhost
+  )
+  [ -n "$master" ] && [ "$master" != "$to_host" ]
+}
 
 deadline=$(($(date +%s) + DEMOTE_TIMEOUT_SECONDS))
 attempt=1
@@ -31,6 +46,10 @@ while true; do
       exit 0
       ;;
     master)
+      if out_of_date; then
+        log "Sentinel no longer names $to_host as master: the local Kvrocks is left as it is"
+        exit 0
+      fi
       [ "$attempt" -gt 1 ] || log "demoting the local Kvrocks, new master is $to_host"
       kv_cli localhost slaveof "$to_host" "$to_port" >/dev/null || true
       # Connected clients must reconnect and reach the new master.
