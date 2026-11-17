@@ -143,7 +143,7 @@ scenario_handover_aborted_on_stop() {
 # handover script exists to avoid. What the chart still guarantees is that the old master
 # is demoted at once, not ten seconds later, and that every pod ends up identical.
 scenario_plain_sentinel_failover() {
-  local master other demoted_after report
+  local master other demoted_after report lost
   master=$(current_master)
   other=$(((master + 1) % REPLICAS))
   start_load plainfailover
@@ -155,6 +155,15 @@ scenario_plain_sentinel_failover() {
   wait_healthy
   report=$(finish_load plainfailover)
   assert_report plain_sentinel_failover "$report" "$MAX_LOSS_ON_PLAIN_FAILOVER" "$MAX_PLANNED_WRITE_GAP_SECONDS"
+  # The lost writes are those the old master kept for itself: to rejoin, it had to copy the
+  # whole database again. It is the one full sync the scenarios are sure of. Not counted,
+  # Kvrocks has reworded its log, and every check that nothing was copied again passes
+  # without looking.
+  lost=$(jq -r '.lost' <<<"$report")
+  if [ "$lost" -gt 0 ]; then
+    [ "$(pod_full_syncs "$master")" -ge 1 ] ||
+      fail "plain_sentinel_failover: the old master lost $lost writes, yet its log shows no full sync"
+  fi
 }
 
 # Every pod restarts in turn; the master hands over from its preStop hook.

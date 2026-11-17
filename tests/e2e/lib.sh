@@ -468,12 +468,16 @@ cut_replication() { # $1: replica ordinal, $2: master ordinal
   drop_traffic "$(node_of "$1")" -s "$(pod_ip "$1")" -d "$(pod_ip "$2")" -p tcp --dport "$INTERNAL_PORT"
 }
 
-# Full syncs logged by the running Kvrocks containers. A restarted container starts from 0.
+# Full syncs logged by the running Kvrocks container of a pod. A restarted container starts
+# from 0.
+pod_full_syncs() { # $1: ordinal
+  k logs "$(pod_name "$1")" -c kvrocks 2>/dev/null | grep -c 'fullsync was finish' || true
+}
+
 count_full_syncs() {
-  local ordinal count total=0
+  local ordinal total=0
   for ordinal in $(ordinals); do
-    count=$(k logs "$(pod_name "$ordinal")" -c kvrocks 2>/dev/null | grep -c 'fullsync was finish' || true)
-    total=$((total + count))
+    total=$((total + $(pod_full_syncs "$ordinal")))
   done
   printf '%s\n' "$total"
 }
