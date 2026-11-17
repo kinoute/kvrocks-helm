@@ -25,7 +25,10 @@ data:
       option clitcpka
       option srvtcpka
       # Pod IPs change on restart: resolve at runtime, and start even if a pod is not in DNS yet.
-      default-server init-addr last,libc,none resolvers cluster_dns resolve-prefer ipv4
+      # A server is down until its first check succeeds. HAProxy otherwise takes every server
+      # for up when it starts: every Sentinel then votes for every pod, and the connections
+      # opened before the first checks go to pod 0, master or not.
+      default-server init-addr last,libc,none resolvers cluster_dns resolve-prefer ipv4 init-state down
 
     resolvers cluster_dns
       parse-resolv-conf
