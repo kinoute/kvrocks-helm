@@ -149,6 +149,44 @@ test_a_master_that_will_not_step_down_keeps_its_writes_paused() {
   assert_not_called "localhost:6379 client unpause"
 }
 
+test_a_failover_already_running_is_seen_through() {
+  cluster_ready
+  # Sentinel promotes kv-1 all the same, but answers that a failover was running already.
+  mv "$WORLD/localhost:26379/sentinel_failover_kvrocks" "$WORLD/promote"
+  handler localhost:26379 "sentinel failover kvrocks" <<'HANDLER'
+sh "$WORLD/promote" >/dev/null
+echo "INPROG Failover already in progress"
+HANDLER
+  switchover
+  assert_eq 0 "$STATUS" "exit status"
+  assert_called "localhost:6379 slaveof kv-1.h 6379"
+}
+
+test_a_sentinel_that_missed_the_failover_is_not_followed() {
+  cluster_ready
+  # The failover is accepted but never completes, and kv-2's Sentinel still names the master
+  # of an older epoch.
+  reply localhost:26379 "sentinel failover kvrocks" "OK"
+  sentinel_names kv-2.h kv-1.h 0
+  switchover
+  assert_eq 1 "$STATUS" "exit status"
+  assert_not_called "localhost:6379 slaveof"
+}
+
+test_no_handover_without_the_config_epoch_of_sentinel() {
+  cluster_ready
+  # The local Sentinel names kv-0 when picked, then stops giving its config epoch.
+  handler localhost:26379 "sentinel master kvrocks" <<'HANDLER'
+reads=$(($(cat "$WORLD/epoch-reads" 2>/dev/null || echo 0) + 1))
+echo "$reads" >"$WORLD/epoch-reads"
+printf 'name\nkvrocks\nip\nkv-0.h\nflags\nmaster\n'
+[ "$reads" -gt 2 ] || printf 'config-epoch\n1\n'
+HANDLER
+  switchover
+  assert_eq 1 "$STATUS" "exit status"
+  assert_not_called "client pause"
+}
+
 test_giving_up_leaves_a_pause_of_the_fencing_alone() {
   cluster_ready
   kvrocks_replica kv-2.h kv-0.h 50
