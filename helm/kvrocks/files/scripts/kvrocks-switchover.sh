@@ -61,10 +61,6 @@ done
 writes_held=no
 target_priority=""
 
-now_ms() {
-  date +%s%3N
-}
-
 # The replicas this Sentinel could promote. It ranks them with offsets it read up to ten
 # seconds earlier, so any of them may win: every one must be up to date.
 promotion_candidates() ( # $1: Sentinel host. A subshell: the timeout stays local.
@@ -156,11 +152,14 @@ wait_until_caught_up() { # $1: offset to reach, $2: replica hosts, $3: deadline
 
 # Fails when this Kvrocks cannot pause writes: CLIENT PAUSE WRITE came with Kvrocks 2.16.0.
 pause_writes() {
-  [ "$(kv_cli localhost client pause "$SWITCHOVER_PAUSE_MS" write)" = "OK" ]
+  [ "$(hold_writes handover "$SWITCHOVER_PAUSE_MS")" = "OK" ]
 }
 
 resume_writes() {
-  kv_cli localhost client unpause >/dev/null || true
+  local holder
+  if ! holder=$(release_hold handover); then
+    log "writes stay paused, the $holder still holds them"
+  fi
 }
 
 release_writes() {

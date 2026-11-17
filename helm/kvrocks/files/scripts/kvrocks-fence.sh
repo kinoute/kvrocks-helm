@@ -48,10 +48,6 @@ last_confirmed_ms=""
 # itself while nothing else is wrong.
 peer_addresses=""
 
-now_ms() {
-  date +%s%3N
-}
-
 resolve() { # $1: hostname. Prints its address, or nothing.
   timeout "$PROBE_TIMEOUT_SECONDS" getent hosts "$1" 2>/dev/null | awk 'NR == 1 { print $1 }'
 }
@@ -110,7 +106,7 @@ is_followed() {
 
 fence() {
   local reply
-  reply=$(kv_cli localhost client pause "$FENCE_PAUSE_MS" write | tr -d '\r')
+  reply=$(hold_writes fencing "$FENCE_PAUSE_MS")
   # redis-cli exits 0 on an error reply: only the reply tells a refused pause, from a
   # Kvrocks without CLIENT PAUSE WRITE for instance. No reply at all is a Kvrocks that does
   # not answer, which may have paused anyway. Either way, the next check pauses again.
@@ -125,10 +121,14 @@ fence() {
 }
 
 unfence() { # $1: why
+  local holder
   [ "$fenced" = yes ] || return 0
-  kv_cli localhost client unpause >/dev/null || true
   fenced=no
-  log "$1: writes resumed"
+  if holder=$(release_hold fencing); then
+    log "$1: writes resumed"
+  else
+    log "$1: writes stay paused, the $holder still holds them"
+  fi
 }
 
 while true; do

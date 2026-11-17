@@ -17,6 +17,10 @@ log() {
   printf '%s [%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${SCRIPT_NAME:-kvrocks}" "$*" >&2
 }
 
+now_ms() {
+  date +%s%3N
+}
+
 pod_fqdn() { # $1: pod ordinal
   printf '%s-%s.%s\n' "$KVROCKS_STATEFULSET" "$1" "$KVROCKS_PEERS_DOMAIN"
 }
@@ -70,6 +74,41 @@ kv_role() { # $1: host
     master | slave) printf '%s\n' "$role" ;;
     *) printf 'unknown\n' ;;
   esac
+}
+
+# Two scripts pause the writes of this Kvrocks: the handover and the fencing sidecar. CLIENT
+# UNPAUSE lifts every pause at once, so each one writes down until when it wants writes
+# paused, and none lifts a pause another still holds. The directory is on the `tmp` volume,
+# which the kvrocks and fence containers share.
+WRITE_HOLDS_DIR=${WRITE_HOLDS_DIR:-/tmp/write-holds}
+
+# Pauses writes on behalf of $1. Prints the reply of Kvrocks: OK once paused.
+hold_writes() { # $1: holder (handover, fencing), $2: milliseconds
+  mkdir -p "$WRITE_HOLDS_DIR"
+  # Written before the pause: the other holder must never see a pause it cannot account for.
+  # And through a rename, so that it never reads a half-written file.
+  printf '%s\n' "$(($(now_ms) + $2))" >"$WRITE_HOLDS_DIR/.$1"
+  mv "$WRITE_HOLDS_DIR/.$1" "$WRITE_HOLDS_DIR/$1"
+  kv_cli localhost client pause "$2" write | tr -d '\r'
+}
+
+# Lets go of the writes $1 held. They resume, unless another holder still wants them paused:
+# then fails, and prints that holder.
+release_hold() { # $1: holder
+  local hold until
+  rm -f "$WRITE_HOLDS_DIR/$1"
+  for hold in "$WRITE_HOLDS_DIR"/*; do
+    [ -f "$hold" ] || continue
+    until=$(cat "$hold")
+    case "$until" in
+      "" | *[!0-9]*) continue ;;
+    esac
+    if [ "$(now_ms)" -lt "$until" ]; then
+      basename "$hold"
+      return 1
+    fi
+  done
+  kv_cli localhost client unpause >/dev/null || true
 }
 
 # A view is what a Sentinel believes: "<config epoch> <master>". Sentinel raises the epoch

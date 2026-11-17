@@ -149,6 +149,10 @@ spec:
             - name: scripts
               mountPath: /scripts
               readOnly: true
+            # Shared with the kvrocks container: there the handover writes down how long
+            # it holds writes paused, and the fence must not lift that pause.
+            - name: tmp
+              mountPath: /tmp
         {{- end }}
       {{- end }}
       containers:
@@ -239,7 +243,8 @@ spec:
           configMap:
             name: {{ include "kvrocks.scriptsConfigMapName" . }}
             defaultMode: 0555
-        # Writable scratch space with a read-only root filesystem: the pid file, Sentinel's dir.
+        # Writable scratch space with a read-only root filesystem: the pid file, Sentinel's
+        # dir, and the write pauses the handover and the fence hold.
         - name: tmp
           emptyDir: {}
         {{- if .Values.tls.enabled }}
