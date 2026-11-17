@@ -1,0 +1,64 @@
+suite: Values schema
+templates:
+  - configmap.yaml
+release:
+  name: db
+  namespace: data
+set:
+  auth.password: test-password
+tests:
+  - it: refuses a master name with a space, which sentinel.conf would split
+    set:
+      sentinel.masterName: my master
+    asserts:
+      - failedTemplate:
+          errorPattern: masterName
+
+  - it: accepts a master name with dots, dashes and underscores
+    set:
+      sentinel.masterName: db_main-1.eu
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: refuses a fall count of 0, which HAProxy would not start with
+    set:
+      haproxy.check.fall: 0
+    asserts:
+      - failedTemplate:
+          errorPattern: fall
+
+  - it: refuses a failover that could never re-sync a replica
+    set:
+      sentinel.parallelSyncs: 0
+    asserts:
+      - failedTemplate:
+          errorPattern: parallelSyncs
+
+  - it: refuses an HAProxy that accepts no connection
+    set:
+      haproxy.maxConnections: 0
+    asserts:
+      - failedTemplate:
+          errorPattern: maxConnections
+
+  - it: refuses a Sentinel timing of 0
+    set:
+      sentinel.failoverTimeoutMilliseconds: 0
+    asserts:
+      - failedTemplate:
+          errorPattern: failoverTimeoutMilliseconds
+
+  - it: accepts a seccomp profile of the node, with its path
+    set:
+      podSecurityContext.seccompProfile.type: Localhost
+      podSecurityContext.seccompProfile.localhostProfile: profiles/kvrocks.json
+      haproxy.podSecurityContext.seccompProfile.type: Localhost
+      haproxy.podSecurityContext.seccompProfile.localhostProfile: profiles/haproxy.json
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: accepts capabilities added to the containers
+    set:
+      containerSecurityContext.capabilities.add: [NET_BIND_SERVICE]
+    asserts:
+      - notFailedTemplate: {}
