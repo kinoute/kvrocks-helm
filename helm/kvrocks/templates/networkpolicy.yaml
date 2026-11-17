@@ -2,6 +2,8 @@
 {{- if or .Values.networkPolicy.enabled .Values.tls.enabled }}
 {{- $kvrocksPods := include "kvrocks.selectorLabels" (dict "root" . "component" "kvrocks") }}
 {{- $haproxyPods := include "kvrocks.selectorLabels" (dict "root" . "component" "haproxy") }}
+{{- /* The pod of `helm test` writes through the client port, wherever the clients come from. */}}
+{{- $testPods := include "kvrocks.selectorLabels" (dict "root" . "component" "test") }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -44,6 +46,9 @@ spec:
       {{- with .Values.networkPolicy.clientsFrom }}
       from:
         {{- toYaml . | nindent 8 }}
+        - podSelector:
+            matchLabels:
+              {{- $testPods | nindent 14 }}
       {{- end }}
     {{- if .Values.metrics.enabled }}
     - ports:
@@ -74,6 +79,9 @@ spec:
       {{- with .Values.networkPolicy.clientsFrom }}
       from:
         {{- toYaml . | nindent 8 }}
+        - podSelector:
+            matchLabels:
+              {{- $testPods | nindent 14 }}
       {{- end }}
     {{- if .Values.metrics.enabled }}
     - ports:
