@@ -173,8 +173,8 @@ scenario_rolling_update() {
 # A Kubernetes upgrade, as a managed node pool runs it without a spare node: each node in
 # turn is cordoned, drained, kept out for a while, then given back. With one Kvrocks pod per
 # node, the drained pod has nowhere else to go: the release runs on the others until its node
-# comes back, and the PodDisruptionBudget holds the next drain until then. Everything is
-# evicted, cluster DNS included, except the load generator: it measures, it is not under test.
+# comes back, and the PodDisruptionBudget holds the next drain until then. Everything on the
+# node is evicted except the load generator: it measures, it is not under test.
 scenario_node_upgrade() {
   local node report
   start_load nodeupgrade

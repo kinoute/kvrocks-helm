@@ -86,6 +86,14 @@ ensure_cluster() {
       kind create cluster --name "$CLUSTER_NAME" --config "$E2E_DIR/kind.yaml" --kubeconfig "$KUBECONFIG"
   fi
   kubectl wait --for=condition=Ready nodes --all --timeout=180s >/dev/null
+  # Cluster DNS stays on the control plane, with the clients: the scenarios take workers
+  # down, some for minutes, and only dns_outage is meant to take cluster DNS with them. Kind
+  # starts CoreDNS there, but once dns_outage scaled it back up, the scheduler spread it over
+  # the workers, and the pods of a worker restarted alone found no DNS at all. kubeadm's
+  # CoreDNS already tolerates the control plane's taint.
+  kubectl -n kube-system patch deployment coredns --patch \
+    '{"spec":{"template":{"spec":{"nodeSelector":{"node-role.kubernetes.io/control-plane":""}}}}}' >/dev/null
+  kubectl -n kube-system rollout status deployment coredns --timeout=120s >/dev/null
 }
 
 # Only the load generator is built here. The chart's own images are pulled by the nodes,
