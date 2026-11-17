@@ -177,6 +177,9 @@ bind port dir pidfile log-dir daemonize cluster-enabled requirepass masterauth s
 {{- if and .Values.tls.authClients (not .Values.tls.ca.secret) }}
 {{- fail "tls.authClients needs tls.ca.secret, the CA client certificates must chain to" }}
 {{- end }}
+{{- if and .Values.tls.clientSecret (not .Values.tls.ca.secret) }}
+{{- fail "tls.clientSecret needs tls.ca.secret: helm test checks the server certificate against that CA" }}
+{{- end }}
 {{- if eq (int .Values.tls.internalPort) (int .Values.port) }}
 {{- fail "tls.internalPort must differ from port: Kvrocks serves TLS on port and keeps internalPort in clear" }}
 {{- end }}
