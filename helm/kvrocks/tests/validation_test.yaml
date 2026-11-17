@@ -343,6 +343,53 @@ tests:
     asserts:
       - notFailedTemplate: {}
 
+  # --- Ports: the containers of a pod share its network ---
+
+  - it: refuses Sentinel on the port of Kvrocks
+    set:
+      sentinel.port: 6379
+    asserts:
+      - failedTemplate:
+          errorMessage: "port 6379 is used twice in the Kvrocks pods: port, tls.internalPort, sentinel.port and metrics.port must differ"
+
+  - it: refuses the exporter on the port of Sentinel
+    set:
+      metrics.port: 26379
+    asserts:
+      - failedTemplate:
+          errorMessage: "port 26379 is used twice in the Kvrocks pods: port, tls.internalPort, sentinel.port and metrics.port must differ"
+
+  - it: refuses the port in clear of TLS on the port of Sentinel
+    set:
+      tls.enabled: true
+      tls.existingSecret: db-server-tls
+      tls.ca.secret: db-ca
+      tls.internalPort: 26379
+    asserts:
+      - failedTemplate:
+          errorMessage: "port 26379 is used twice in the Kvrocks pods: port, tls.internalPort, sentinel.port and metrics.port must differ"
+
+  - it: ignores the port of an exporter that is off
+    set:
+      metrics.enabled: false
+      metrics.port: 6379
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: ignores the port of Sentinel in standalone mode
+    set:
+      architecture: standalone
+      port: 26379
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: refuses the health endpoints of HAProxy on its client port
+    set:
+      haproxy.healthPort: 6379
+    asserts:
+      - failedTemplate:
+          errorMessage: "haproxy.healthPort must differ from port: HAProxy listens on both"
+
   # --- TLS ---
 
   - it: refuses TLS without the server certificate Secret
