@@ -157,7 +157,7 @@ For a release named `db`, with the default ports:
 | serviceAccount.name | string | the release's full name with `create`, else `default` | Name of the ServiceAccount. |
 | startupProbe | object | `{"failureThreshold":240,"periodSeconds":5,"timeoutSeconds":5}` | Kvrocks only listens once its database is open, which takes time on a large volume: the startup probe allows `failureThreshold * periodSeconds` (20 minutes by default). |
 | switchover.pauseMilliseconds | int | `5000` | Milliseconds client writes are paused while the master hands its role over (rolling update, drain). Must be lower than `sentinel.downAfterMilliseconds`, or Sentinel declares the paused master down. |
-| terminationGracePeriodSeconds | int | `120` | Seconds a pod gets to stop: the master handover, then Kvrocks flushing its WAL. |
+| terminationGracePeriodSeconds | int | `120` | Seconds a pod gets to stop: the master handover, then Kvrocks flushing its WAL. At least `switchover.pauseMilliseconds` plus `sentinel.failoverTimeoutMilliseconds`, plus 30 s. |
 | tls.authClients | bool | `true` | Requires clients to present a certificate signed by that CA (mTLS). |
 | tls.ca.key | string | `"ca.crt"` | Key of the bundle in that Secret. |
 | tls.ca.secret | string | `""` | Secret with the CA bundle client certificates must chain to. Required with `authClients`. |

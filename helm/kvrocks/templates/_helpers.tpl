@@ -219,6 +219,17 @@ would slip a reserved setting past the check below. The namespace tokens are cre
 {{- if ge (int .Values.switchover.pauseMilliseconds) (int .Values.sentinel.downAfterMilliseconds) }}
 {{- fail "switchover.pauseMilliseconds must be lower than sentinel.downAfterMilliseconds, or Sentinel declares the paused master down" }}
 {{- end }}
+{{- /*
+The preStop hook of a master runs the handover: the write pause, then at worst the whole
+failover timeout of Sentinel. Kvrocks then stops and flushes its WAL. Killed before, the pod
+leaves the failover to finish without it, writes paused.
+*/}}
+{{- $stopSeconds := 30 }}
+{{- $handoverSeconds := div (add (int64 .Values.switchover.pauseMilliseconds) (int64 .Values.sentinel.failoverTimeoutMilliseconds) 999) 1000 }}
+{{- $minGraceSeconds := add $handoverSeconds $stopSeconds }}
+{{- if lt (int64 .Values.terminationGracePeriodSeconds) $minGraceSeconds }}
+{{- fail (printf "terminationGracePeriodSeconds must be at least %d: the handover of a master can take switchover.pauseMilliseconds plus sentinel.failoverTimeoutMilliseconds, then Kvrocks needs %d s to stop" $minGraceSeconds $stopSeconds) }}
+{{- end }}
 {{- end }}
 {{- end }}
 

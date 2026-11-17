@@ -134,7 +134,8 @@ podAntiAffinity: hard # @schema enum:[hard,soft]
 # -- Replaces the default affinity entirely.
 affinity: {} # @schema additionalProperties:true
 
-# -- Seconds a pod gets to stop: the master handover, then Kvrocks flushing its WAL.
+# -- Seconds a pod gets to stop: the master handover, then Kvrocks flushing its WAL. At
+# least `switchover.pauseMilliseconds` plus `sentinel.failoverTimeoutMilliseconds`, plus 30 s.
 terminationGracePeriodSeconds: 120
 
 # -- Security context of the Kvrocks pods. 999 is the user of the Kvrocks image.
