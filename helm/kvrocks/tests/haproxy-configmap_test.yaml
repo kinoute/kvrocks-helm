@@ -254,20 +254,6 @@ tests:
           path: data["haproxy.cfg"]
           pattern: 'backend sentinel_votes_0\n  option tcp-check\n  tcp-check connect\n  tcp-check send "AUTH \$\{KVROCKS_PASSWORD\}\\r\\n"\n  tcp-check expect string \+OK\n'
 
-  - it: sends no AUTH when auth is disabled
-    set:
-      auth.enabled: false
-    asserts:
-      - notMatchRegex:
-          path: data["haproxy.cfg"]
-          pattern: AUTH
-      - matchRegex:
-          path: data["haproxy.cfg"]
-          pattern: 'backend kvrocks_0\n  option tcp-check\n  tcp-check connect\n  tcp-check send "INFO replication\\r\\n"\n'
-      - matchRegex:
-          path: data["haproxy.cfg"]
-          pattern: 'backend sentinel_votes_0\n  option tcp-check\n  tcp-check connect\n  tcp-check send "SENTINEL MASTER kvrocks\\r\\n"\n'
-
   - it: never contains the password itself
     asserts:
       - notMatchRegex:

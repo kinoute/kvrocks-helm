@@ -17,9 +17,6 @@
     "auth": {
       "additionalProperties": false,
       "properties": {
-        "enabled": {
-          "type": "boolean"
-        },
         "existingSecret": {
           "type": "string"
         },

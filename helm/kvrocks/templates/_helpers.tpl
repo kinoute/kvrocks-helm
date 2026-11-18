@@ -123,13 +123,11 @@ run the new scripts with its old environment.
 
 {{/* The password as an environment variable, shared by every container that needs it. */}}
 {{- define "kvrocks.passwordEnv" -}}
-{{- if .Values.auth.enabled }}
 - name: KVROCKS_PASSWORD
   valueFrom:
     secretKeyRef:
       name: {{ include "kvrocks.secretName" . }}
       key: {{ .Values.auth.secretKey }}
-{{- end }}
 {{- end }}
 
 {{/*
@@ -160,8 +158,8 @@ bind port dir pidfile log-dir daemonize cluster-enabled requirepass masterauth s
 
 {{/* Fails the render on values that would produce a broken or unsafe deployment. */}}
 {{- define "kvrocks.validate" -}}
-{{- if and .Values.auth.enabled (not .Values.auth.existingSecret) (not .Values.auth.password) }}
-{{- fail "auth is enabled: set auth.existingSecret or auth.password" }}
+{{- if and (not .Values.auth.existingSecret) (not .Values.auth.password) }}
+{{- fail "Kvrocks always requires a password: set auth.existingSecret or auth.password" }}
 {{- end }}
 {{- if regexMatch "[\\s\"'\\\\]" (toString .Values.auth.password) }}
 {{- fail "auth.password must not contain whitespace, quotes or backslashes: HAProxy sends it in its health checks" }}
@@ -295,5 +293,5 @@ leaves the failover to finish without it, writes paused.
   value: {{ .Values.switchover.pauseMilliseconds | int64 | quote }}
 - name: SENTINEL_FAILOVER_TIMEOUT_MS
   value: {{ .Values.sentinel.failoverTimeoutMilliseconds | int64 | quote }}
-{{- include "kvrocks.passwordEnv" . }}
+{{ include "kvrocks.passwordEnv" . }}
 {{- end }}

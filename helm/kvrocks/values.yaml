@@ -34,9 +34,8 @@ image:
   # -- Pull policy of the Kvrocks image.
   pullPolicy: IfNotPresent # @schema enum:[Always,IfNotPresent,Never]
 
+# Kvrocks and Sentinel always require a password.
 auth:
-  # -- Requires a password on Kvrocks and Sentinel.
-  enabled: true
   # -- Name of an existing Secret holding the password. Takes precedence over `password`.
   existingSecret: ""
   # -- Key of the password in the Secret.

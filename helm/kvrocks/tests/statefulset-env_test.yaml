@@ -298,27 +298,6 @@ tests:
                 name: db-kvrocks
                 key: kvrocks-password
 
-  - it: sets no KVROCKS_PASSWORD when auth is disabled
-    template: statefulset.yaml
-    set:
-      auth.enabled: false
-    asserts:
-      - notContains:
-          path: spec.template.spec.containers[?(@.name == "kvrocks")].env
-          content:
-            name: KVROCKS_PASSWORD
-          any: true
-      - notContains:
-          path: spec.template.spec.initContainers[?(@.name == "sentinel")].env
-          content:
-            name: KVROCKS_PASSWORD
-          any: true
-      - notContains:
-          path: spec.template.spec.containers[?(@.name == "metrics")].env
-          content:
-            name: KVROCKS_PASSWORD
-          any: true
-
   - it: never passes the password on a command line
     template: statefulset.yaml
     asserts:
