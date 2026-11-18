@@ -699,6 +699,17 @@ ready_pods() { # $1: component (kvrocks, haproxy)
     awk '$1 == "True" { ready++ } { all++ } END { printf "%d/%d", ready, all }'
 }
 
+# The rotation of the README: a new password in the Secret, then every pod deleted at once.
+rotate_password() { # $1: new password
+  helm upgrade "$RELEASE" "$REPO_ROOT/helm/kvrocks" --namespace "$NAMESPACE" --reuse-values \
+    --set-string "auth.password=$1" >/dev/null
+  k delete pod -l "app.kubernetes.io/instance=$RELEASE" --wait=false >/dev/null
+  # The client pod reads the password when it starts.
+  k delete pod "$CLIENT_POD" --ignore-not-found --wait=true >/dev/null
+  k wait --for=delete pod -l "app.kubernetes.io/instance=$RELEASE" --timeout=180s >/dev/null 2>&1 || true
+  wait_healthy
+}
+
 # How many times the Sentinels of the given pods entered TILT mode since a moment.
 sentinel_tilts_since() { # $1: time (RFC 3339), then ordinals
   local since=$1 ordinal
