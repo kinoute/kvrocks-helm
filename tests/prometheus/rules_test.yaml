@@ -23,6 +23,8 @@ tests:
         values: "0x10"
       - series: 'kvrocks_used_disk_size{namespace="kv", service="kv-kvrocks-headless", pod="kv-kvrocks-0"}'
         values: "50x10"
+      - series: 'kvrocks_used_db_size{namespace="kv", service="kv-kvrocks-headless", pod="kv-kvrocks-0"}'
+        values: "40x10"
       - series: 'kvrocks_disk_capacity_bytes{namespace="kv", service="kv-kvrocks-headless", pod="kv-kvrocks-0"}'
         values: "100x10"
       - series: 'haproxy_backend_active_servers{namespace="kv", service="kv-kvrocks-haproxy-metrics", pod="haproxy-a", proxy="kvrocks_0"}'
@@ -43,7 +45,11 @@ tests:
       - eval_time: 10m
         alertname: KvrocksDiskUsageHigh
       - eval_time: 10m
+        alertname: KvrocksFullSyncWouldNotFit
+      - eval_time: 10m
         alertname: KvrocksWriteEndpointDown
+      - eval_time: 10m
+        alertname: KvrocksSentinelVoteMissing
 
   - name: no master at all is critical, even though the count is empty rather than zero
     interval: 1m
@@ -58,6 +64,7 @@ tests:
               severity: critical
             exp_annotations:
               summary: kv-kvrocks has 0 masters instead of 1
+              description: 'With none, writes are refused. With two, a former master has not stepped down yet, and HAProxy only routes to the one a majority of Sentinels names. `SENTINEL MASTER kvrocks` on each pod''s Sentinel tells which pod they name.'
 
   - name: two masters are critical
     interval: 1m
@@ -74,6 +81,7 @@ tests:
               severity: critical
             exp_annotations:
               summary: kv-kvrocks has 2 masters instead of 1
+              description: 'With none, writes are refused. With two, a former master has not stepped down yet, and HAProxy only routes to the one a majority of Sentinels names. `SENTINEL MASTER kvrocks` on each pod''s Sentinel tells which pod they name.'
 
   - name: a failover that completes within the delay raises nothing
     interval: 15s
@@ -106,6 +114,7 @@ tests:
               pod: kv-kvrocks-1
             exp_annotations:
               summary: Kvrocks replica kv-kvrocks-1 lost its master
+              description: 'This replica no longer receives the writes of the master. Sentinel can still promote it if it is the last replica left, and the writes it missed would be lost. `INFO replication` on it, then the logs of its kvrocks container.'
       - eval_time: 10m
         alertname: KvrocksReplicasMissing
         exp_alerts:
@@ -113,6 +122,7 @@ tests:
               severity: warning
             exp_annotations:
               summary: kv-kvrocks has 1 healthy replicas instead of 2
+              description: 'Fewer replicas follow the master than the release runs. If the master fails now, Sentinel has fewer pods, or none, to promote.'
 
   - name: another release in the same namespace does not trigger the alerts of this one
     interval: 1m
@@ -145,6 +155,7 @@ tests:
               pod: kv-kvrocks-0
             exp_annotations:
               summary: The volume of kv-kvrocks-0 is 90% full
+              description: 'Grow the volumes before they fill, as described under "Upgrading the chart" in the README of the chart''s repository.'
 
   - name: no HAProxy that reaches a master is critical
     interval: 1m
@@ -161,6 +172,7 @@ tests:
               severity: critical
             exp_annotations:
               summary: No HAProxy of kv-kvrocks can reach a master, writes are refused
+              description: 'No pod is named master by a majority of Sentinels that reach it, or none reports itself as master. Every pod down, the Sentinels without a majority, and a fenced master all look like this. `SENTINEL MASTER kvrocks` on each pod''s Sentinel, then the handover log on the volume of the master.'
 
   - name: no majority of Sentinels agreeing on a master is critical, even with a pod still master
     interval: 1m
@@ -177,6 +189,7 @@ tests:
               severity: critical
             exp_annotations:
               summary: No HAProxy of kv-kvrocks can reach a master, writes are refused
+              description: 'No pod is named master by a majority of Sentinels that reach it, or none reports itself as master. Every pod down, the Sentinels without a majority, and a fenced master all look like this. `SENTINEL MASTER kvrocks` on each pod''s Sentinel, then the handover log on the volume of the master.'
 
   - name: the votes and the role must point at the same pod
     interval: 1m
@@ -193,6 +206,7 @@ tests:
               severity: critical
             exp_annotations:
               summary: No HAProxy of kv-kvrocks can reach a master, writes are refused
+              description: 'No pod is named master by a majority of Sentinels that reach it, or none reports itself as master. Every pod down, the Sentinels without a majority, and a fenced master all look like this. `SENTINEL MASTER kvrocks` on each pod''s Sentinel, then the handover log on the volume of the master.'
 
   - name: one HAProxy pod that still routes is enough
     interval: 1m
@@ -206,3 +220,72 @@ tests:
     alert_rule_test:
       - eval_time: 10m
         alertname: KvrocksWriteEndpointDown
+
+  - name: a volume that could not hold a second copy of the database is reported, long before it fills
+    interval: 1m
+    input_series:
+      - series: 'kvrocks_used_disk_size{namespace="kv", service="kv-kvrocks-headless", pod="kv-kvrocks-0"}'
+        values: "55x10"
+      - series: 'kvrocks_used_db_size{namespace="kv", service="kv-kvrocks-headless", pod="kv-kvrocks-0"}'
+        values: "46x10"
+      - series: 'kvrocks_disk_capacity_bytes{namespace="kv", service="kv-kvrocks-headless", pod="kv-kvrocks-0"}'
+        values: "100x10"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: KvrocksDiskUsageHigh
+      - eval_time: 10m
+        alertname: KvrocksFullSyncWouldNotFit
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: kv
+              service: kv-kvrocks-headless
+              pod: kv-kvrocks-0
+            exp_annotations:
+              summary: A full sync of kv-kvrocks-0 would not fit on its volume
+              description: 'A full sync keeps the old database next to the new copy until it completes. On this volume it would fill the disk, and the pod would never become ready again. Grow the volumes before a failover forces one.'
+
+  - name: a Sentinel that no longer votes for the master is reported while writes still go through
+    interval: 1m
+    input_series:
+      - series: 'haproxy_backend_active_servers{namespace="kv", service="kv-kvrocks-haproxy-metrics", pod="haproxy-a", proxy="kvrocks_0"}'
+        values: "1x10"
+      - series: 'haproxy_backend_active_servers{namespace="kv", service="kv-kvrocks-haproxy-metrics", pod="haproxy-a", proxy="sentinel_votes_0"}'
+        values: "2x10"
+      - series: 'haproxy_backend_active_servers{namespace="kv", service="kv-kvrocks-haproxy-metrics", pod="haproxy-b", proxy="kvrocks_0"}'
+        values: "1x10"
+      - series: 'haproxy_backend_active_servers{namespace="kv", service="kv-kvrocks-haproxy-metrics", pod="haproxy-b", proxy="sentinel_votes_0"}'
+        values: "2x10"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: KvrocksWriteEndpointDown
+      - eval_time: 10m
+        alertname: KvrocksSentinelVoteMissing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: Only 2 of the 3 Sentinels of kv-kvrocks name and reach the master
+              description: 'A Sentinel is down, cannot reach the master, or still knows an old address of it. Writes still go through, but losing one more pod leaves no majority to fail over. `SENTINEL MASTER kvrocks` on each pod''s Sentinel shows which one disagrees.'
+
+  - name: one HAProxy pod that counts every vote is enough
+    interval: 1m
+    input_series:
+      - series: 'haproxy_backend_active_servers{namespace="kv", service="kv-kvrocks-haproxy-metrics", pod="haproxy-a", proxy="sentinel_votes_0"}'
+        values: "2x10"
+      - series: 'haproxy_backend_active_servers{namespace="kv", service="kv-kvrocks-haproxy-metrics", pod="haproxy-b", proxy="sentinel_votes_0"}'
+        values: "3x10"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: KvrocksSentinelVoteMissing
+
+  - name: a failover that moves the votes within the delay raises no missing vote
+    interval: 15s
+    input_series:
+      - series: 'haproxy_backend_active_servers{namespace="kv", service="kv-kvrocks-haproxy-metrics", pod="haproxy-a", proxy="sentinel_votes_0"}'
+        values: "3x8 0x40"
+      - series: 'haproxy_backend_active_servers{namespace="kv", service="kv-kvrocks-haproxy-metrics", pod="haproxy-a", proxy="sentinel_votes_1"}'
+        values: "0x8 1x2 3x40"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: KvrocksSentinelVoteMissing

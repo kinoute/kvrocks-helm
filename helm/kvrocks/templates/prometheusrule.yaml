@@ -27,6 +27,7 @@ spec:
             {{- end }}
           annotations:
             summary: Kvrocks instance {{ `{{ $labels.pod }}` }} is down
+            description: Prometheus does not reach the exporter of this pod, or the exporter does not reach Kvrocks. `kubectl describe pod` and the logs of its kvrocks container tell which.
         - alert: KvrocksMasterCountWrong
           # `or vector(0)`: with no master at all the count is empty, not zero.
           expr: (count(kvrocks_instance_info{ {{- $kvrocks -}}, role="master"}) or vector(0)) != 1
@@ -38,6 +39,7 @@ spec:
             {{- end }}
           annotations:
             summary: {{ $name }} has {{ `{{ $value }}` }} masters instead of 1
+            description: With none, writes are refused. With two, a former master has not stepped down yet, and HAProxy only routes to the one a majority of Sentinels names. `SENTINEL MASTER {{ .Values.sentinel.masterName }}` on each pod's Sentinel tells which pod they name.
         - alert: KvrocksReplicationBroken
           expr: kvrocks_master_link_up{ {{- $kvrocks -}} } == 0
           for: {{ $rule.forMinutes }}m
@@ -48,6 +50,7 @@ spec:
             {{- end }}
           annotations:
             summary: Kvrocks replica {{ `{{ $labels.pod }}` }} lost its master
+            description: This replica no longer receives the writes of the master. Sentinel can still promote it if it is the last replica left, and the writes it missed would be lost. `INFO replication` on it, then the logs of its kvrocks container.
         {{- if include "kvrocks.isReplication" . }}
         - alert: KvrocksReplicasMissing
           # Counted on the replicas: the master's connected_slaves keeps counting a replica
@@ -61,6 +64,7 @@ spec:
             {{- end }}
           annotations:
             summary: {{ $name }} has {{ `{{ $value }}` }} healthy replicas instead of {{ sub (int .Values.replicaCount) 1 }}
+            description: Fewer replicas follow the master than the release runs. If the master fails now, Sentinel has fewer pods, or none, to promote.
         {{- end }}
         - alert: KvrocksBackgroundErrors
           expr: kvrocks_num_background_errors{ {{- $kvrocks -}} } > 0
@@ -72,6 +76,7 @@ spec:
             {{- end }}
           annotations:
             summary: RocksDB reports background errors on {{ `{{ $labels.pod }}` }}
+            description: RocksDB stops writing after a background error, a full disk or a corrupt file for instance. The logs of the kvrocks container say which.
         - alert: KvrocksDiskUsageHigh
           expr: kvrocks_used_disk_size{ {{- $kvrocks -}} } / kvrocks_disk_capacity_bytes{ {{- $kvrocks -}} } > {{ $rule.diskUsageThreshold }}
           for: {{ $rule.forMinutes }}m
@@ -82,6 +87,23 @@ spec:
             {{- end }}
           annotations:
             summary: The volume of {{ `{{ $labels.pod }}` }} is {{ `{{ $value | humanizePercentage }}` }} full
+            description: Grow the volumes before they fill, as described under "Upgrading the chart" in the README of the chart's repository.
+        {{- if include "kvrocks.isReplication" . }}
+        - alert: KvrocksFullSyncWouldNotFit
+          # A full sync downloads a whole copy of the database next to the old one, which it
+          # only deletes at the end. It follows any crash failover where the former master
+          # holds writes the new one never got, so it comes when it comes.
+          expr: kvrocks_used_disk_size{ {{- $kvrocks -}} } + kvrocks_used_db_size{ {{- $kvrocks -}} } > kvrocks_disk_capacity_bytes{ {{- $kvrocks -}} }
+          for: {{ $rule.forMinutes }}m
+          labels:
+            severity: warning
+            {{- with $rule.alertLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: A full sync of {{ `{{ $labels.pod }}` }} would not fit on its volume
+            description: A full sync keeps the old database next to the new copy until it completes. On this volume it would fill the disk, and the pod would never become ready again. Grow the volumes before a failover forces one.
+        {{- end }}
         {{- if include "kvrocks.haproxyEnabled" . }}
         - alert: KvrocksWriteEndpointDown
           # HAProxy's own routing condition: a pod that a majority of Sentinels names as
@@ -107,5 +129,19 @@ spec:
             {{- end }}
           annotations:
             summary: No HAProxy of {{ $name }} can reach a master, writes are refused
+            description: No pod is named master by a majority of Sentinels that reach it, or none reports itself as master. Every pod down, the Sentinels without a majority, and a fenced master all look like this. `SENTINEL MASTER {{ .Values.sentinel.masterName }}` on each pod's Sentinel, then the handover log on the volume of the master.
+        - alert: KvrocksSentinelVoteMissing
+          # The votes HAProxy counts for the master: Sentinels that name it and pinged it less
+          # than 2 s ago. One missing vote is still a majority, but one more failure is not.
+          expr: max(haproxy_backend_active_servers{ {{- $haproxy -}}, proxy=~"sentinel_votes_[0-9]+"}) < {{ .Values.replicaCount }}
+          for: {{ $rule.forMinutes }}m
+          labels:
+            severity: warning
+            {{- with $rule.alertLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: Only {{ `{{ $value }}` }} of the {{ .Values.replicaCount }} Sentinels of {{ $name }} name and reach the master
+            description: A Sentinel is down, cannot reach the master, or still knows an old address of it. Writes still go through, but losing one more pod leaves no majority to fail over. `SENTINEL MASTER {{ .Values.sentinel.masterName }}` on each pod's Sentinel shows which one disagrees.
         {{- end }}
 {{- end }}
