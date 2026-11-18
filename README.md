@@ -215,7 +215,7 @@ The chart does not take backups. Two ways that fit it:
 - A `VolumeSnapshot` of a replica's volume. RocksDB recovers from its write-ahead log, so a snapshot of a running replica is consistent.
 - A job that attaches to the write endpoint's master as an extra replica, waits for the sync, and copies the files. Start it with `slave-priority 0`, or Sentinel may promote it.
 
-To restore, follow the migration above with the backup as the data.
+To restore, follow the migration above with the backup as the data, keeping only its `db/` directory. A snapshot of a pod of the chart also holds `sentinel/sentinel.conf`, the view of the cluster that pod had. A pod 0 that starts on it follows the master that view names: in the same release and namespace, that is another pod, empty, which waits for a failover that may never come.
 
 ### Upgrading the chart
 
