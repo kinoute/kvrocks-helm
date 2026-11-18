@@ -235,6 +235,47 @@ $(cat "$WORLD/out")"
   [ "$elapsed" -lt 2000 ] || fail "gave up after $elapsed ms"
 }
 
+test_a_write_that_got_past_the_pause_cancels_the_handover() {
+  cluster_ready
+  # kv-2 answers with every write the master held at the pause, and the master takes one more.
+  handler kv-2.h:6379 "info replication" <<'HANDLER'
+printf '# Replication\nrole:master\nconnected_slaves:2\nmaster_repl_offset:101\n' \
+  >"$WORLD/localhost:6379/info_replication"
+printf '# Replication\nrole:slave\nmaster_host:kv-0.h\nmaster_port:6379\nmaster_link_status:up\nmaster_sync_in_progress:0\nslave_repl_offset:100\n'
+HANDLER
+  switchover
+  assert_eq 1 "$STATUS" "exit status"
+  assert_not_called "sentinel failover"
+  assert_called "localhost:6379 client unpause"
+  grep -q 'moved past offset 100' "$WORLD/out" || fail "no reason given; output was:
+$(cat "$WORLD/out")"
+}
+
+slow_to_answer() { # $1: host:port, $2: command, whose reply already set comes 0.45 s late
+  file="$WORLD/$1/$(printf '%s' "$2" | tr '[:upper:] ' '[:lower:]_')"
+  mv "$file" "$file.reply"
+  handler "$1" "$2" <<HANDLER
+sleep 0.45
+cat "$file.reply"
+HANDLER
+}
+
+test_checks_that_eat_the_pause_cancel_the_handover_before_the_request() {
+  cluster_ready
+  for host in kv-1.h kv-2.h; do
+    slow_to_answer "$host:6379" "info replication"
+  done
+  slow_to_answer localhost:26379 "sentinel replicas kvrocks"
+  # Checking the replicas then takes about 0.9 s, and checking them again 1.35 s: 2.3 s in,
+  # past the 1.7 s at which a request of up to 1 s, then the renewal, no longer fit.
+  export SWITCHOVER_PAUSE_MS=3200
+  switchover
+  assert_eq 1 "$STATUS" "exit status"
+  assert_not_called "sentinel failover"
+  grep -q 'the checks took too long' "$WORLD/out" || fail "no reason given; output was:
+$(cat "$WORLD/out")"
+}
+
 test_giving_up_leaves_a_pause_of_the_fencing_alone() {
   cluster_ready
   kvrocks_replica kv-2.h kv-0.h 50
