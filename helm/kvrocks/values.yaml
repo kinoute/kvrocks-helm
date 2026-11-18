@@ -88,8 +88,8 @@ config: # @schema additionalProperties:true
   use-rsid-psync: "yes" # @schema type:[string,boolean]
 
 persistence:
-  # -- Keeps the data on a PersistentVolumeClaim per pod. Without it, the data lives in an
-  # `emptyDir` and a restarted pod copies everything again from the master.
+  # -- Keeps the data on a PersistentVolumeClaim per pod. `replication` requires it. In
+  # `standalone` mode, without it, the data lives in an `emptyDir` and is lost with the pod.
   enabled: true
   # -- StorageClass of the volumes.
   # @default -- the cluster's default StorageClass

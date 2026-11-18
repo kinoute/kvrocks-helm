@@ -74,9 +74,10 @@ tests:
             name: data
           any: true
 
-  - it: stores data in an emptyDir when persistence is disabled
+  - it: stores data in an emptyDir when persistence is disabled in standalone mode
     template: statefulset.yaml
     set:
+      architecture: standalone
       persistence.enabled: false
     asserts:
       - notExists:
