@@ -3,13 +3,7 @@
 {{- if include "kvrocks.isReplication" . }}
 Kvrocks runs with 1 master and {{ sub (int .Values.replicaCount) 1 }} replicas.
 
-{{- if include "kvrocks.haproxyEnabled" . }}
-
 Writes (always the master):  {{ $name }}.{{ $domain }}:{{ .Values.service.port }}{{ if .Values.tls.enabled }} (TLS{{ if .Values.tls.authClients }}, client certificate required{{ end }}){{ end }}
-{{- else }}
-
-HAProxy is disabled: there is no write endpoint, clients must ask Sentinel for the master.
-{{- end }}
 {{- if .Values.readService.enabled }}
 Reads (any ready pod):       {{ $name }}-read.{{ $domain }}:{{ .Values.readService.port }}
 {{- end }}

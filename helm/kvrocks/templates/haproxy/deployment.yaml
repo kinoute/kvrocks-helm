@@ -1,4 +1,4 @@
-{{- if include "kvrocks.haproxyEnabled" . }}
+{{- if include "kvrocks.isReplication" . }}
 {{- $selectorLabels := include "kvrocks.selectorLabels" (dict "root" . "component" "haproxy") }}
 apiVersion: apps/v1
 kind: Deployment

@@ -25,13 +25,6 @@ tests:
       - hasDocuments:
           count: 0
 
-  - it: is absent when HAProxy is disabled
-    set:
-      haproxy.enabled: false
-    asserts:
-      - hasDocuments:
-          count: 0
-
   # --- One pair of backends per pod ---
 
   - it: declares one kvrocks backend per pod

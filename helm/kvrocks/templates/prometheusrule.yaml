@@ -104,7 +104,7 @@ spec:
             summary: A full sync of {{ `{{ $labels.pod }}` }} would not fit on its volume
             description: A full sync keeps the old database next to the new copy until it completes. On this volume it would fill the disk, and the pod would never become ready again. Grow the volumes before a failover forces one.
         {{- end }}
-        {{- if include "kvrocks.haproxyEnabled" . }}
+        {{- if include "kvrocks.isReplication" . }}
         - alert: KvrocksWriteEndpointDown
           # HAProxy's own routing condition: a pod that a majority of Sentinels names as
           # master and reaches, and that reports itself as master. When no HAProxy pod sees

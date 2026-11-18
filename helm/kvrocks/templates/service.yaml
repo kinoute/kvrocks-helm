@@ -1,9 +1,5 @@
-{{- $haproxy := include "kvrocks.haproxyEnabled" . }}
-{{- /*
-The write endpoint. With replication it must only ever reach the master, which is
-HAProxy's job. Replication without HAProxy has no such endpoint: clients ask Sentinel.
-*/}}
-{{- if or $haproxy (not (include "kvrocks.isReplication" .)) }}
+{{- $haproxy := include "kvrocks.isReplication" . }}
+{{- /* The write endpoint. With replication it must only ever reach the master: HAProxy's job. */}}
 apiVersion: v1
 kind: Service
 metadata:
@@ -26,4 +22,3 @@ spec:
       {{- end }}
   selector:
     {{- include "kvrocks.selectorLabels" (dict "root" . "component" (ternary "haproxy" "kvrocks" (not (empty $haproxy)))) | nindent 4 }}
-{{- end }}

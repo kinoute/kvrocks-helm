@@ -29,14 +29,6 @@ tests:
       - hasDocuments:
           count: 0
 
-  - it: is absent when HAProxy is disabled
-    template: haproxy/deployment.yaml
-    set:
-      haproxy.enabled: false
-    asserts:
-      - hasDocuments:
-          count: 0
-
   # --- Replicas and rollout ---
 
   - it: runs 2 replicas by default

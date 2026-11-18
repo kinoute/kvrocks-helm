@@ -128,33 +128,6 @@ tests:
             alert: KvrocksFullSyncWouldNotFit
           any: true
 
-  - it: has no alert on HAProxy's view in replication mode without HAProxy
-    set:
-      metrics.prometheusRule.enabled: true
-      haproxy.enabled: false
-    asserts:
-      - notContains:
-          path: spec.groups[0].rules
-          content:
-            alert: KvrocksWriteEndpointDown
-          any: true
-      - notContains:
-          path: spec.groups[0].rules
-          content:
-            alert: KvrocksSentinelVoteMissing
-          any: true
-
-  - it: keeps the KvrocksReplicasMissing alert in replication mode without HAProxy
-    set:
-      metrics.prometheusRule.enabled: true
-      haproxy.enabled: false
-    asserts:
-      - contains:
-          path: spec.groups[0].rules
-          content:
-            alert: KvrocksReplicasMissing
-          any: true
-
   # --- Series selectors ---
 
   - it: selects the Kvrocks series by namespace and headless Service

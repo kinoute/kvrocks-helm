@@ -55,10 +55,6 @@ imagePullSecrets:
 {{- if eq .Values.architecture "replication" }}true{{- end }}
 {{- end }}
 
-{{- define "kvrocks.haproxyEnabled" -}}
-{{- if and (include "kvrocks.isReplication" .) .Values.haproxy.enabled }}true{{- end }}
-{{- end }}
-
 {{- define "kvrocks.replicaCount" -}}
 {{- if include "kvrocks.isReplication" . }}{{ .Values.replicaCount }}{{ else }}1{{ end }}
 {{- end }}
@@ -177,13 +173,6 @@ bind port dir pidfile log-dir daemonize cluster-enabled requirepass masterauth s
 {{- if eq (int .Values.tls.internalPort) (int .Values.port) }}
 {{- fail "tls.internalPort must differ from port: Kvrocks serves TLS on port and keeps internalPort in clear" }}
 {{- end }}
-{{- /*
-Without HAProxy, clients ask Sentinel for the master. Under TLS, Sentinel speaks in clear,
-stays closed to clients, and would give them the port in clear anyway.
-*/}}
-{{- if and (include "kvrocks.isReplication" .) (not .Values.haproxy.enabled) }}
-{{- fail "tls.enabled needs haproxy.enabled in replication: Sentinel stays inside the release, and clients would have no way to the master" }}
-{{- end }}
 {{- end }}
 {{- /* The containers of a pod share its network: two of them cannot listen on one port. */}}
 {{- $kvrocksPorts := list (int .Values.port) }}
@@ -203,7 +192,7 @@ stays closed to clients, and would give them the port in clear anyway.
 {{- end }}
 {{- $_ := set $portsSeen (toString $port) true }}
 {{- end }}
-{{- if and (include "kvrocks.haproxyEnabled" .) (eq (int .Values.port) (int .Values.haproxy.healthPort)) }}
+{{- if and (include "kvrocks.isReplication" .) (eq (int .Values.port) (int .Values.haproxy.healthPort)) }}
 {{- fail "haproxy.healthPort must differ from port: HAProxy listens on both" }}
 {{- end }}
 {{- /*

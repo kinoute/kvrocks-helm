@@ -258,9 +258,8 @@ fencing:
   # -- Resources of the fencing sidecar.
   resources: {} # @schema additionalProperties:true
 
+# HAProxy, the write endpoint in `replication` mode.
 haproxy:
-  # -- Deploys HAProxy as the write endpoint. Without it, clients must be Sentinel-aware.
-  enabled: true
   # -- Image of HAProxy. Same fields as `image`.
   image:
     registry: docker.io

@@ -42,17 +42,6 @@ tests:
           path: metadata.name
           value: db-kvrocks
 
-  - it: creates only the kvrocks policy in replication mode without HAProxy
-    set:
-      networkPolicy.enabled: true
-      haproxy.enabled: false
-    asserts:
-      - hasDocuments:
-          count: 1
-      - equal:
-          path: metadata.name
-          value: db-kvrocks
-
   # --- Policy of the kvrocks pods ---
 
   - it: restricts ingress to the kvrocks pods

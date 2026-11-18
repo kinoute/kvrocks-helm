@@ -1,8 +1,7 @@
-{{- $writeService := or (include "kvrocks.haproxyEnabled" .) (not (include "kvrocks.isReplication" .)) }}
 {{- $tls := .Values.tls.enabled }}
 {{- /* Under mTLS the test needs a client certificate of its own. */}}
 {{- $canConnect := or (not $tls) (not .Values.tls.authClients) .Values.tls.clientSecret }}
-{{- if and $writeService $canConnect }}
+{{- if $canConnect }}
 # `helm test`: a write through the write endpoint must be accepted and read back.
 apiVersion: v1
 kind: Pod

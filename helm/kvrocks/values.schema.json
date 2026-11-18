@@ -126,9 +126,6 @@
         "dnsOutageTolerance": {
           "type": "string"
         },
-        "enabled": {
-          "type": "boolean"
-        },
         "healthPort": {
           "maximum": 65535,
           "minimum": 1,

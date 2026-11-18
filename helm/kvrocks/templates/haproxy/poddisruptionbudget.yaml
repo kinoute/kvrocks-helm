@@ -1,4 +1,4 @@
-{{- if and (include "kvrocks.haproxyEnabled" .) .Values.haproxy.podDisruptionBudget.enabled }}
+{{- if and (include "kvrocks.isReplication" .) .Values.haproxy.podDisruptionBudget.enabled }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
