@@ -71,6 +71,9 @@ test_a_master_cut_off_from_its_peers_is_paused() {
   sleep 4
   stop_fence
   assert_called "localhost:6379 client pause 10000 write"
+  grep -q 'writes paused: 1 of 3 Sentinels name this pod as master and 0 of 2 replicas follow it' "$WORLD/fence.log" ||
+    fail "the log does not say what the check found; it was:
+$(cat "$WORLD/fence.log")"
 }
 
 test_a_pause_is_renewed_before_it_runs_out() {

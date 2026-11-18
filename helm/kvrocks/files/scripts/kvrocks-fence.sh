@@ -96,12 +96,18 @@ followers() {
   wait
 }
 
+# What the last check found, for the log line that tells why writes were paused.
+sentinels_naming=0
+replicas_following=0
+
 # A majority of Sentinels names this pod, or a majority of pods replicates from it.
 is_followed() {
   local answers
   answers=$(followers)
-  [ "$(printf '%s\n' "$answers" | grep -c -x sentinel)" -ge "$SENTINEL_MAJORITY" ] ||
-    [ "$(printf '%s\n' "$answers" | grep -c -x replica)" -ge $((SENTINEL_MAJORITY - 1)) ]
+  sentinels_naming=$(printf '%s\n' "$answers" | grep -c -x sentinel || true)
+  replicas_following=$(printf '%s\n' "$answers" | grep -c -x replica || true)
+  [ "$sentinels_naming" -ge "$SENTINEL_MAJORITY" ] ||
+    [ "$replicas_following" -ge $((SENTINEL_MAJORITY - 1)) ]
 }
 
 fence() {
@@ -115,7 +121,7 @@ fence() {
     return 0
   fi
   if [ "$fenced" = no ]; then
-    log "neither a majority of Sentinels nor of replicas follows this pod: writes paused"
+    log "writes paused: $sentinels_naming of $KVROCKS_REPLICAS Sentinels name this pod as master and $replicas_following of $((KVROCKS_REPLICAS - 1)) replicas follow it, a majority of neither"
     fenced=yes
   fi
 }
