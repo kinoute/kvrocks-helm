@@ -37,8 +37,10 @@ if [ ! -d "$server" ] || [ -e "$server/down" ]; then
   echo "Could not connect to Redis at $host:$port: Connection refused" >&2
   exit 1
 fi
+# exec: busybox timeout kills only the process it started, and a sleep left behind would
+# keep the caller's pipe open.
 if [ -e "$server/hang" ]; then
-  sleep 3600
+  exec sleep 3600
 fi
 
 key=$(printf '%s\n' "$*" | tr '[:upper:]' '[:lower:]' | tr ' ' '_')
