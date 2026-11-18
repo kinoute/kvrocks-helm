@@ -382,7 +382,7 @@ With data: `large_dataset` wrote 10 GiB shaped like a production workload, 30.4 
 
 ```bash
 make test        # lint, Kubernetes schemas, helm-unittest, script tests, alert rules, load generator
-make e2e-quick   # handover, rolling update, master crash and TLS clients on a local Kind cluster
+make e2e-quick   # handover, rolling update, master crash, fencing, lost volume and TLS clients on a local Kind cluster
 make e2e         # every failure scenario
 make e2e-cluster CONTEXT=<kube context>   # the scenarios that leave the nodes alone, on a real cluster
 ```
