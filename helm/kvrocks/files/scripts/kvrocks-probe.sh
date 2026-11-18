@@ -14,6 +14,11 @@ answers() {
 
 # The probe must answer well within its timeoutSeconds (5 s by default).
 PROBE_CLI_TIMEOUT_SECONDS=1
+
+# Kubernetes shows what a failed probe printed in the events of the pod: say why.
+not_ready() { # $1: why
+  printf 'not ready: %s\n' "$1"
+}
 # A Sentinel that does not answer within this time counts as one that cannot promote us.
 SENTINEL_PROBE_TIMEOUT_SECONDS=0.5
 
@@ -45,7 +50,9 @@ promotable_enough() {
   answered=$(printf '%s\n' "$opinions" | grep -c -E '^(yes|no)$' || true)
   promotable=$(printf '%s\n' "$opinions" | grep -c -x yes || true)
   [ "$promotable" -ge "$SENTINEL_MAJORITY" ] && return 0
-  [ "$answered" -lt "$SENTINEL_MAJORITY" ] && [ "$promotable" -eq "$answered" ]
+  [ "$answered" -lt "$SENTINEL_MAJORITY" ] && [ "$promotable" -eq "$answered" ] && return 0
+  not_ready "$promotable of the $answered Sentinels that answered could promote it, $SENTINEL_MAJORITY needed"
+  return 1
 }
 
 field() { # $1: INFO replication output, $2: field
@@ -79,11 +86,15 @@ caught_up() { # $1: master host
       kv_info_field localhost slave_repl_offset
     )
     case "$offset" in
-      "" | *[!0-9]*) return 1 ;;
+      "" | *[!0-9]*)
+        not_ready "it does not give its own offset"
+        return 1
+        ;;
     esac
     [ "$offset" -lt "$target" ] || return 0
     reads=$((reads + 1))
   done
+  not_ready "it holds offset $offset, its master $1 held $target a moment ago"
   return 1
 }
 
@@ -92,21 +103,32 @@ caught_up() { # $1: master host
 # stops the next pod, the master maybe, while this one is still catching up or out of
 # Sentinel's reach.
 is_ready() {
-  local info
+  local info master reason
   info=$(
     CLI_TIMEOUT_SECONDS=$PROBE_CLI_TIMEOUT_SECONDS
     kv_cli localhost info replication | tr -d '\r'
   )
   case "$(field "$info" role)" in
     master) return 0 ;;
-    slave)
-      [ "$(field "$info" master_link_status)" = "up" ] &&
-        [ "$(field "$info" master_sync_in_progress)" = "0" ] &&
-        caught_up "$(field "$info" master_host)" &&
-        { [ "$KVROCKS_ARCHITECTURE" != "replication" ] || promotable_enough; }
+    slave) ;;
+    *)
+      # An error reply, NOAUTH after a password change for instance, says more than no role.
+      reason=$(printf '%s\n' "$info" | grep -v -e '^#' -e '^$' | head -n 1)
+      not_ready "Kvrocks gives no role${reason:+: $reason}"
+      return 1
       ;;
-    *) return 1 ;;
   esac
+  master=$(field "$info" master_host)
+  if [ "$(field "$info" master_link_status)" != "up" ]; then
+    not_ready "its link to the master $master is down"
+    return 1
+  fi
+  if [ "$(field "$info" master_sync_in_progress)" != "0" ]; then
+    not_ready "it is copying the whole database from the master $master"
+    return 1
+  fi
+  caught_up "$master" || return 1
+  [ "$KVROCKS_ARCHITECTURE" != "replication" ] || promotable_enough
 }
 
 case "${1:-}" in

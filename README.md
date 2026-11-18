@@ -55,7 +55,7 @@ If a replica is behind, the handover gives up and writes stay paused until the p
 
 The handover asks a Sentinel that is not in TILT mode. Sentinel goes into TILT for 30 s after it was stalled for more than 2 s, by a busy node for instance: it still answers OK to a failover request, but runs nothing, and writes would stay paused until the other Sentinels declare the master down. Only when every Sentinel is in TILT does the handover ask one all the same, and writes then stay paused until it leaves TILT (scenario `switchover_with_sentinel_in_tilt`).
 
-A replica only becomes ready once it holds every write its master held a moment before, and once a majority of Sentinels could promote it.
+A replica only becomes ready once it holds every write its master held a moment before, and once a majority of Sentinels could promote it. When it is not ready, the probe says why, and `kubectl describe pod` shows it in the events of the pod.
 
 The first condition is there because the replication link says too little. When the master lets a replica resume from an old point of its write-ahead log, Kvrocks reports the link as up at once, while the replica still replays that log. Without the condition, a replica millions of writes behind would be ready: the read Service would send it reads, and a rolling update would move on to the next pod (scenario `replica_far_behind`). When the master does not answer, the link alone decides.
 
