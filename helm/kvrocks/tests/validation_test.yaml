@@ -16,19 +16,12 @@ tests:
       auth.password: ""
     asserts:
       - failedTemplate:
-          errorMessage: "auth is enabled: set auth.existingSecret or auth.password"
+          errorMessage: "Kvrocks always requires a password: set auth.existingSecret or auth.password"
 
   - it: accepts auth with an existing Secret and no password
     set:
       auth.password: ""
       auth.existingSecret: my-credentials
-    asserts:
-      - notFailedTemplate: {}
-
-  - it: accepts no password at all when auth is disabled
-    set:
-      auth.enabled: false
-      auth.password: ""
     asserts:
       - notFailedTemplate: {}
 

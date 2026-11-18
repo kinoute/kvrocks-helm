@@ -77,10 +77,8 @@ data:
     backend sentinel_votes_{{ $ordinal }}
       option tcp-check
       tcp-check connect
-      {{- if $.Values.auth.enabled }}
       tcp-check send "AUTH ${KVROCKS_PASSWORD}\r\n"
       tcp-check expect string +OK
-      {{- end }}
       tcp-check send "SENTINEL MASTER {{ $.Values.sentinel.masterName }}\r\n"
       # This field follows the address, the flags and last-ok-ping-reply: once it is there,
       # they are complete...
@@ -101,10 +99,8 @@ data:
     backend kvrocks_{{ $ordinal }}
       option tcp-check
       tcp-check connect
-      {{- if $.Values.auth.enabled }}
       tcp-check send "AUTH ${KVROCKS_PASSWORD}\r\n"
       tcp-check expect string +OK
-      {{- end }}
       tcp-check send "INFO replication\r\n"
       # Wait for the role line, then decide at once: a replica is a "no", not a timeout.
       tcp-check expect string role:

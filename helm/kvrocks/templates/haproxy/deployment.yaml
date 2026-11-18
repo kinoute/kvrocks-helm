@@ -74,10 +74,8 @@ spec:
         - name: haproxy
           image: {{ include "kvrocks.image" (dict "root" . "image" .Values.haproxy.image "defaultTag" "") }}
           imagePullPolicy: {{ .Values.haproxy.image.pullPolicy }}
-          {{- with (include "kvrocks.passwordEnv" .) }}
           env:
-            {{- . | nindent 12 }}
-          {{- end }}
+            {{- include "kvrocks.passwordEnv" . | nindent 12 }}
           ports:
             - name: kvrocks
               containerPort: {{ .Values.port }}

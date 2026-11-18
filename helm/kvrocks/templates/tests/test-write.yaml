@@ -25,9 +25,7 @@ spec:
       image: {{ include "kvrocks.image" (dict "root" . "image" .Values.image "defaultTag" .Chart.AppVersion) }}
       imagePullPolicy: {{ .Values.image.pullPolicy }}
       env:
-        {{- with (include "kvrocks.passwordEnv" .) }}
-        {{- . | nindent 8 }}
-        {{- end }}
+        {{- include "kvrocks.passwordEnv" . | nindent 8 }}
         - name: WRITE_HOST
           value: {{ include "kvrocks.fullname" . }}
         - name: WRITE_PORT

@@ -106,16 +106,6 @@ tests:
                 name: my-credentials
                 key: kvrocks-password
 
-  - it: sets no KVROCKS_PASSWORD when auth is disabled
-    set:
-      auth.enabled: false
-    asserts:
-      - notContains:
-          path: spec.containers[0].env
-          content:
-            name: KVROCKS_PASSWORD
-          any: true
-
   - it: hands the password to redis-cli through the environment, never as an argument
     asserts:
       - lengthEqual:

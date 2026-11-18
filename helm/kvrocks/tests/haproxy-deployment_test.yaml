@@ -233,14 +233,6 @@ tests:
                   name: my-credentials
                   key: kvrocks-password
 
-  - it: has no environment at all when auth is disabled
-    template: haproxy/deployment.yaml
-    set:
-      auth.enabled: false
-    asserts:
-      - notExists:
-          path: spec.template.spec.containers[0].env
-
   - it: never passes the password on a command line
     template: haproxy/deployment.yaml
     asserts:

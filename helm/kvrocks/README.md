@@ -54,7 +54,6 @@ For a release named `db`, with the default ports:
 |-----|------|---------|-------------|
 | affinity | object | `{}` | Replaces the default affinity entirely. |
 | architecture | string | `"replication"` | `replication`: one master and its replicas, with Sentinel failover and an HAProxy write endpoint. `standalone`: a single Kvrocks, no Sentinel, no HAProxy. |
-| auth.enabled | bool | `true` | Requires a password on Kvrocks and Sentinel. |
 | auth.existingSecret | string | `""` | Name of an existing Secret holding the password. Takes precedence over `password`. |
 | auth.password | string | `""` | Password stored in a Secret created by the chart. Prefer `existingSecret`. It must not contain whitespace, double quotes or backslashes. |
 | auth.secretKey | string | `"password"` | Key of the password in the Secret. |
