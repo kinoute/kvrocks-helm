@@ -296,6 +296,7 @@ Measured on 2026-11-16 with `make e2e`, on a Kind cluster of 3 workers running i
 | Rolling restart of HAProxy | 344 287 | 0 | 0.5 s |
 | Master pod deleted with `--force` | 102 386 | 0 | 2.8 s |
 | Master's node killed | 253 049 | 4 | 16.5 s |
+| Master's node killed with a replica of cluster DNS on it (2026-11-18) | 425 252 | 6 | 94.7 s |
 | Master pod cut off from the network | 134 760 | 4 | 13.9 s |
 | Master cut off from the other pods only | 188 976 | 19 374 | 10.3 s |
 | Replica volume lost | 187 268 | 0 | 0.8 s |
@@ -303,13 +304,15 @@ Measured on 2026-11-16 with `make e2e`, on a Kind cluster of 3 workers running i
 
 When the master's pod is deleted, Kubernetes recreates it within 3 s, on the same volume but with a new address. On Kind, the Sentinels reach it again before they declare it down and nothing fails over. When the node dies instead, Sentinel waits 10 s (`sentinel.downAfterMilliseconds`) then promotes a replica.
 
+That 16.5 s holds while cluster DNS runs elsewhere. When the node that dies also runs one of the replicas of CoreDNS, as the scheduler of a real cluster may place them, writes stopped for 89 to 95 s in four runs (scenario `master_node_failure_with_dns`). Sentinel resolves the names of the pods on the spot, and blocks while it does: until Kubernetes notices that the node is gone, part of its lookups go to the dead replica and wait for their timeout. Each stall over 2 s puts Sentinel in TILT mode, where it neither declares a master down nor fails over, until 30 s after the last one. A resolver timeout of 1 s in the pods' `dnsConfig` changed nothing (88.9 s). See [Caveats](#caveats).
+
 Where a vanished pod address drops packets instead of refusing them, as with Cilium, the Sentinels can stay stuck on the old address for longer than that, and fail over even though the pod came back. HAProxy, which resolves the new address at once, used to send writes to the recreated pod meanwhile, and those were lost with the failover: 1 848 acknowledged writes in one run on a real cluster. It now waits for a majority of Sentinels to reach the pod, so either they do in time and nothing fails over, or they fail over to a replica that holds every acknowledged write. See [On a real cluster](#on-a-real-cluster).
 
 The 19 374 writes of the isolated master are the two seconds before it was fenced: HAProxy still reached it, so the connections already open kept writing to it. Without fencing, it would have kept them for the whole partition.
 
 Three more scenarios write 2 000 keys, then kill every node at once and check that all of them are still on every pod: a plain full outage, an outage where the former master that missed a failover restarts first, and one where pod 0 comes back first with an empty volume. None lost a key.
 
-Two scenarios stop cluster DNS for a minute. In the first, nothing else is wrong and nothing changes: same master, no write paused, none lost. In the second, an HAProxy pod is replaced during the outage: it starts without the address of any pod, waits, and routed at most 5 s after DNS came back.
+Two scenarios stop cluster DNS for a minute. In the first, nothing else is wrong, and the connections already open keep writing: same master, no write paused, none lost. A client that connects during the outage is refused, though: the Sentinels stall on their lookups and stop answering HAProxy in time, so neither HAProxy pod routes, and only the master stays ready behind the read Service. In the second, an HAProxy pod is replaced during the outage: it starts without the address of any pod, waits, and routed at most 5 s after DNS came back.
 
 One scenario refuses a replica its replication link while the master takes 3.8 million writes. Once the link is back, the replica replays them, and its readiness probe held the pod back for the 8 s that took.
 
@@ -344,6 +347,7 @@ With data: `large_dataset` wrote 10 GiB shaped like a production workload, 30.4 
 
 ## Caveats
 
+- **Cluster DNS is on the failover path.** Sentinel resolves the names of the pods on the spot and blocks while it does. When the master's node dies with a replica of CoreDNS on it, writes stop for about 90 s instead of 16 s; during a cluster DNS outage, new connections are refused while open ones keep writing. See [What a failure costs](#what-a-failure-costs). Keeping CoreDNS off the nodes of the release avoids the first, where the cluster allows it.
 - **Replication is asynchronous.** When the master crashes, the last writes it acknowledged and had not sent to a replica yet are lost.
 - **Fencing is not instant.** A master cut off from its peers keeps taking writes on the connections already open to it for about two seconds, the time the fencing loop waits before it concludes that the other pods no longer follow it. Those writes are lost.
 - **A slow start can cost a full sync.** A pod picks its role before RocksDB opens. If opening a large database takes longer than `sentinel.downAfterMilliseconds`, Sentinel may fail over meanwhile, and the pod starts as a master nobody routes to. Sentinel then demotes it, and it copies the whole database again. No write is lost.
