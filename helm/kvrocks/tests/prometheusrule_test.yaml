@@ -58,7 +58,7 @@ tests:
     asserts:
       - lengthEqual:
           path: spec.groups[0].rules
-          count: 7
+          count: 9
       - equal:
           path: spec.groups[0].rules[0].alert
           value: KvrocksInstanceDown
@@ -79,7 +79,21 @@ tests:
           value: KvrocksDiskUsageHigh
       - equal:
           path: spec.groups[0].rules[6].alert
+          value: KvrocksFullSyncWouldNotFit
+      - equal:
+          path: spec.groups[0].rules[7].alert
           value: KvrocksWriteEndpointDown
+      - equal:
+          path: spec.groups[0].rules[8].alert
+          value: KvrocksSentinelVoteMissing
+
+  - it: gives every alert a description with what to look at first
+    set:
+      metrics.prometheusRule.enabled: true
+    asserts:
+      - matchRegex:
+          path: spec.groups[0].rules[*].annotations.description
+          pattern: ^\S.{40,}$
 
   - it: has no KvrocksReplicasMissing alert in standalone mode
     set:
@@ -103,7 +117,18 @@ tests:
             alert: KvrocksWriteEndpointDown
           any: true
 
-  - it: has no KvrocksWriteEndpointDown alert in replication mode without HAProxy
+  - it: has no KvrocksFullSyncWouldNotFit alert in standalone mode, which never syncs
+    set:
+      metrics.prometheusRule.enabled: true
+      architecture: standalone
+    asserts:
+      - notContains:
+          path: spec.groups[0].rules
+          content:
+            alert: KvrocksFullSyncWouldNotFit
+          any: true
+
+  - it: has no alert on HAProxy's view in replication mode without HAProxy
     set:
       metrics.prometheusRule.enabled: true
       haproxy.enabled: false
@@ -112,6 +137,11 @@ tests:
           path: spec.groups[0].rules
           content:
             alert: KvrocksWriteEndpointDown
+          any: true
+      - notContains:
+          path: spec.groups[0].rules
+          content:
+            alert: KvrocksSentinelVoteMissing
           any: true
 
   - it: keeps the KvrocksReplicasMissing alert in replication mode without HAProxy

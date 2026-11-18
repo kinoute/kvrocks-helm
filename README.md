@@ -178,7 +178,11 @@ Do not use a plain `SENTINEL FAILOVER` for that. Sentinel promotes a replica whi
 
 ### Alerts
 
-`KvrocksInstanceDown`, `KvrocksMasterCountWrong`, `KvrocksReplicationBroken`, `KvrocksReplicasMissing`, `KvrocksBackgroundErrors`, `KvrocksDiskUsageHigh` and `KvrocksWriteEndpointDown`. They are unit-tested with `promtool` in `tests/prometheus`.
+`KvrocksInstanceDown`, `KvrocksMasterCountWrong`, `KvrocksReplicationBroken`, `KvrocksReplicasMissing`, `KvrocksBackgroundErrors`, `KvrocksDiskUsageHigh`, `KvrocksFullSyncWouldNotFit`, `KvrocksWriteEndpointDown` and `KvrocksSentinelVoteMissing`. Each one says in its `description` what to look at first. They are unit-tested with `promtool` in `tests/prometheus`.
+
+`KvrocksFullSyncWouldNotFit` fires when a volume could not hold a second copy of its database, which is what a full sync needs until it completes (see [Sizing](#sizing)). That can happen with the volume barely half full, long before `KvrocksDiskUsageHigh`, and a full sync comes when a crash failover leaves a former master with writes the new one never got: by then it is too late to grow the volume.
+
+`KvrocksSentinelVoteMissing` fires when fewer than the three Sentinels name the master and reach it, as HAProxy counts them. Writes still go through on the two others, but losing one more pod leaves no majority to fail over.
 
 `KvrocksWriteEndpointDown` follows the routing condition of HAProxy itself: it fires when no HAProxy pod sees a pod that a majority of Sentinels names as master and reaches, and that reports itself as master. That covers every pod down, the Sentinels losing their majority or their link to the master, and a fenced master.
 
