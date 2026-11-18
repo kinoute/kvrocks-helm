@@ -170,8 +170,8 @@ livenessProbe: # @schema additionalProperties:true
   timeoutSeconds: 5
   failureThreshold: 6
 
-# -- A replica is ready once it follows the master and has finished syncing. The Sentinel
-# sidecar takes the same timings.
+# -- A replica is ready once it follows the master, has finished syncing and holds every
+# write the master held a moment before. The Sentinel sidecar takes the same timings.
 readinessProbe: # @schema additionalProperties:true
   periodSeconds: 5
   timeoutSeconds: 5

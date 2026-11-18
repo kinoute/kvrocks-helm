@@ -52,9 +52,45 @@ field() { # $1: INFO replication output, $2: field
   printf '%s\n' "$1" | awk -F: -v field="$2" '$1 == field { print $2 }'
 }
 
-# A replica is ready once it follows its master, has finished syncing, and Sentinel could
-# promote it. The rolling update waits for readiness, so it never stops the next pod, the
-# master maybe, while this one is still catching up or out of Sentinel's reach.
+# How many times a replica reads its own offset before it is called behind.
+OFFSET_READS=3
+
+# The link and the sync flag do not tell whether a replica has caught up. A replica that is
+# far behind, or came back empty, is let in wherever the write-ahead log of the master still
+# reaches, its first write included: Kvrocks then reports the link up and no sync in
+# progress while the replica replays that log, millions of writes at times.
+#
+# So the replica must hold every write its master held a moment ago. The offset of the
+# master is read first: under load, a replica that follows closely is a few writes short
+# of it at most, and gets there within another read. A master that does not answer leaves
+# the decision to the link.
+caught_up() { # $1: master host
+  local target offset reads=0
+  target=$(
+    CLI_TIMEOUT_SECONDS=$PROBE_CLI_TIMEOUT_SECONDS
+    kv_info_field "$1" master_repl_offset
+  )
+  case "$target" in
+    "" | *[!0-9]*) return 0 ;;
+  esac
+  while [ "$reads" -lt "$OFFSET_READS" ]; do
+    offset=$(
+      CLI_TIMEOUT_SECONDS=$PROBE_CLI_TIMEOUT_SECONDS
+      kv_info_field localhost slave_repl_offset
+    )
+    case "$offset" in
+      "" | *[!0-9]*) return 1 ;;
+    esac
+    [ "$offset" -lt "$target" ] || return 0
+    reads=$((reads + 1))
+  done
+  return 1
+}
+
+# A replica is ready once it follows its master, has finished syncing, has caught up with
+# it, and Sentinel could promote it. The rolling update waits for readiness, so it never
+# stops the next pod, the master maybe, while this one is still catching up or out of
+# Sentinel's reach.
 is_ready() {
   local info
   info=$(
@@ -66,6 +102,7 @@ is_ready() {
     slave)
       [ "$(field "$info" master_link_status)" = "up" ] &&
         [ "$(field "$info" master_sync_in_progress)" = "0" ] &&
+        caught_up "$(field "$info" master_host)" &&
         { [ "$KVROCKS_ARCHITECTURE" != "replication" ] || promotable_enough; }
       ;;
     *) return 1 ;;

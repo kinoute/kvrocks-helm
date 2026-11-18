@@ -137,7 +137,7 @@ For a release named `db`, with the default ports:
 | readService.enabled | bool | `true` | Creates a second Service that spreads reads over every ready pod, replicas included. Replication is asynchronous: a read may return slightly stale data. |
 | readService.port | int | `6379` | Port of the read Service. |
 | readService.type | string | `"ClusterIP"` | Type of the read Service. |
-| readinessProbe | object | `{"failureThreshold":3,"periodSeconds":5,"timeoutSeconds":5}` | A replica is ready once it follows the master and has finished syncing. The Sentinel sidecar takes the same timings. |
+| readinessProbe | object | `{"failureThreshold":3,"periodSeconds":5,"timeoutSeconds":5}` | A replica is ready once it follows the master, has finished syncing and holds every write the master held a moment before. The Sentinel sidecar takes the same timings. |
 | replicaCount | int | `3` | Number of Kvrocks pods in `replication` mode: one master, the rest replicas. At least 3, so that a majority of Sentinels survives the loss of one pod. |
 | resources | object | `{}` | Resources of the Kvrocks container. Without any, the pods run as BestEffort and are the first evicted under memory pressure. Kvrocks caches up to 4 GB of blocks by default (`rocksdb.block_cache_size` in `config`). |
 | sentinel.downAfterMilliseconds | int | `10000` | Milliseconds a master must be unreachable before Sentinel declares it down. A crash failover takes a little longer than this. |
