@@ -147,6 +147,10 @@ is_healthy() {
     [ "$ordinal" = "$master" ] || follows "$ordinal" "$master" || return 1
     [ "$(sentinel_sees "$ordinal" num-other-sentinels)" = "$((REPLICAS - 1))" ] || return 1
     [ "$(sentinel_sees "$ordinal" num-slaves)" = "$((REPLICAS - 1))" ] || return 1
+    # For 30 s, a Sentinel in TILT neither votes a master down nor runs a failover. On Kind,
+    # a stall of the Docker VM puts every Sentinel in TILT at once: a scenario started then
+    # would measure that wait, not the chart.
+    [ "$(sentinel_tilt "$ordinal")" = 0 ] || return 1
   done
 }
 
