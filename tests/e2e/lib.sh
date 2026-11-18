@@ -409,8 +409,10 @@ count_keys() { # $1: host, $2: prefix, $3: count
 assert_keys_everywhere() { # $1: scenario, $2: prefix, $3: count
   local host found
   for host in "$FULLNAME" $(for ordinal in $(ordinals); do pod_fqdn "$ordinal"; done); do
-    found=$(count_keys "$host" "$2" "$3")
-    [ "$found" = "$3" ] || fail "$1: $host holds $found of the $3 keys"
+    # grep -c fails when it counts none, and so does a host that cannot be reached: without
+    # the guard, the run would stop here without a word.
+    found=$(count_keys "$host" "$2" "$3") || true
+    [ "$found" = "$3" ] || fail "$1: $host holds ${found:-no answer} of the $3 keys"
   done
   printf '    %s: all %s keys are on the write endpoint and on every pod\n' "$1" "$3"
 }
