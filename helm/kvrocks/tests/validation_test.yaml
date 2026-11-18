@@ -323,6 +323,20 @@ tests:
     asserts:
       - notFailedTemplate: {}
 
+  - it: refuses replication without volumes, which a restart of every pod would empty
+    set:
+      persistence.enabled: false
+    asserts:
+      - failedTemplate:
+          errorMessage: "replication needs persistence.enabled: without volumes, a restart of every pod at once starts over with an empty database"
+
+  - it: accepts standalone without volumes
+    set:
+      architecture: standalone
+      persistence.enabled: false
+    asserts:
+      - notFailedTemplate: {}
+
   - it: refuses a Kvrocks older than 2.16.0, which cannot pause writes for a handover
     set:
       image.tag: 2.15.0

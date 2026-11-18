@@ -237,6 +237,10 @@ across more Sentinels than it was measured with.
 {{- if ne (int .Values.replicaCount) 3 }}
 {{- fail "replication runs exactly 3 pods (replicaCount: 3): the failure scenarios cover no other count" }}
 {{- end }}
+{{- /* An emptyDir does not survive a restart of every pod, as in a password rotation. */}}
+{{- if not .Values.persistence.enabled }}
+{{- fail "replication needs persistence.enabled: without volumes, a restart of every pod at once starts over with an empty database" }}
+{{- end }}
 {{- /* A drain that stops more pods than this leaves no Sentinel majority, so no failover. */}}
 {{- $maxUnavailable := sub (int .Values.replicaCount) (int (include "kvrocks.majority" .)) }}
 {{- if and .Values.podDisruptionBudget.enabled (gt (int .Values.podDisruptionBudget.maxUnavailable) $maxUnavailable) }}
