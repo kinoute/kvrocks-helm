@@ -63,6 +63,37 @@ test_no_handover_when_no_sentinel_names_this_pod() {
   assert_not_called "localhost:6379 client pause"
 }
 
+tilted() { # $1: Sentinel host, which then reports TILT mode
+  reply "$1:26379" "info sentinel" "# Sentinel
+sentinel_masters:1
+sentinel_tilt:1
+sentinel_tilt_since_seconds:3"
+}
+
+test_a_sentinel_in_tilt_mode_is_not_asked_for_the_failover() {
+  cluster_ready
+  tilted localhost
+  sentinel_replicas kv-1.h "kv-1.h slave 300 100" "kv-2.h slave 300 100"
+  promote_on_failover kv-1.h kv-1.h 2
+  switchover
+  assert_eq 0 "$STATUS" "exit status"
+  assert_called "kv-1.h:26379 sentinel failover kvrocks"
+  assert_not_called "localhost:26379 sentinel failover"
+  assert_called "localhost:6379 slaveof kv-1.h 6379"
+}
+
+test_when_every_sentinel_is_in_tilt_mode_one_is_asked_all_the_same() {
+  cluster_ready
+  for sentinel in localhost kv-1.h kv-2.h; do
+    tilted "$sentinel"
+  done
+  switchover
+  assert_eq 0 "$STATUS" "exit status"
+  assert_called "localhost:26379 sentinel failover kvrocks"
+  grep -q 'in TILT mode' "$WORLD/out" || fail "no word of TILT; output was:
+$(cat "$WORLD/out")"
+}
+
 test_no_handover_on_a_kvrocks_that_cannot_pause_writes() {
   cluster_ready
   reply localhost:6379 "client pause" "ERR syntax error"
