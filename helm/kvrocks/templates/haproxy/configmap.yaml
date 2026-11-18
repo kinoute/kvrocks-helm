@@ -1,4 +1,4 @@
-{{- if include "kvrocks.haproxyEnabled" . }}
+{{- if include "kvrocks.isReplication" . }}
 {{- $majority := include "kvrocks.majority" . }}
 {{- $ordinals := until (int .Values.replicaCount) }}
 apiVersion: v1

@@ -31,17 +31,9 @@ tests:
             app.kubernetes.io/instance: db
             app.kubernetes.io/component: kvrocks
 
-  - it: is absent in replication mode without HAProxy, where clients ask Sentinel
-    set:
-      haproxy.enabled: false
-    asserts:
-      - hasDocuments:
-          count: 0
-
-  - it: stays in standalone mode when HAProxy is disabled
+  - it: exists in standalone mode, where it reaches the pod itself
     set:
       architecture: standalone
-      haproxy.enabled: false
     asserts:
       - hasDocuments:
           count: 1

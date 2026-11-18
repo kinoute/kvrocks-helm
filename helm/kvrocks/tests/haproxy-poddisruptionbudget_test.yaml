@@ -43,13 +43,6 @@ tests:
       - hasDocuments:
           count: 0
 
-  - it: is absent when HAProxy is disabled
-    set:
-      haproxy.enabled: false
-    asserts:
-      - hasDocuments:
-          count: 0
-
   - it: is absent in standalone mode
     set:
       architecture: standalone

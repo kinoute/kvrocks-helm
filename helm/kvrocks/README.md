@@ -70,7 +70,6 @@ For a release named `db`, with the default ports:
 | haproxy.check.fall | int | `3` | Failed role checks in a row before HAProxy cuts the connections to a Kvrocks. Higher than 1 so that one slow answer from a busy master does not drop every client. |
 | haproxy.check.interval | string | `"1s"` | How often HAProxy asks each Sentinel for the master and each Kvrocks for its role. |
 | haproxy.dnsOutageTolerance | string | `"1h"` | How long HAProxy keeps the last known address of a pod when cluster DNS stops answering. |
-| haproxy.enabled | bool | `true` | Deploys HAProxy as the write endpoint. Without it, clients must be Sentinel-aware. |
 | haproxy.healthPort | int | `8888` | Port of the health endpoints (`/livez`, `/readyz`) and of `/metrics`. |
 | haproxy.image | object | `{"digest":"","pullPolicy":"IfNotPresent","registry":"docker.io","repository":"haproxy","tag":"3.2.25-alpine"}` | Image of HAProxy. Same fields as `image`. |
 | haproxy.livenessProbe | object | `{"failureThreshold":3,"periodSeconds":10,"timeoutSeconds":3}` | Restarts an HAProxy whose health endpoint stops answering. |

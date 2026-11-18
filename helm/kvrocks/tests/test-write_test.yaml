@@ -38,13 +38,6 @@ tests:
       - hasDocuments:
           count: 1
 
-  - it: is absent in replication mode without HAProxy, where there is no write endpoint
-    set:
-      haproxy.enabled: false
-    asserts:
-      - hasDocuments:
-          count: 0
-
   # --- What it writes to ---
 
   - it: writes through the write Service

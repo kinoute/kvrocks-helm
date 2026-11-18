@@ -463,23 +463,12 @@ tests:
       - failedTemplate:
           errorMessage: "tls.internalPort must differ from port: Kvrocks serves TLS on port and keeps internalPort in clear"
 
-  - it: refuses TLS without HAProxy in replication, which would leave clients no way in
-    set:
-      tls.enabled: true
-      tls.existingSecret: db-server-tls
-      tls.ca.secret: db-ca
-      haproxy.enabled: false
-    asserts:
-      - failedTemplate:
-          errorMessage: "tls.enabled needs haproxy.enabled in replication: Sentinel stays inside the release, and clients would have no way to the master"
-
-  - it: accepts TLS without HAProxy in standalone mode, where clients reach the pod itself
+  - it: accepts TLS in standalone mode, where clients reach the pod itself
     set:
       architecture: standalone
       tls.enabled: true
       tls.existingSecret: db-server-tls
       tls.ca.secret: db-ca
-      haproxy.enabled: false
     asserts:
       - notFailedTemplate: {}
 
