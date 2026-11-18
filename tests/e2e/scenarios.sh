@@ -10,9 +10,15 @@ MAX_LOSS_ON_CRASH=${MAX_LOSS_ON_CRASH:-50}
 MAX_PLANNED_WRITE_GAP_SECONDS=${MAX_PLANNED_WRITE_GAP_SECONDS:-10}
 # Sentinel waits 10 s before declaring the master down, then promotes a replica.
 MAX_CRASH_WRITE_GAP_SECONDS=${MAX_CRASH_WRITE_GAP_SECONDS:-40}
+# What losing the master's node costs today when a replica of cluster DNS dies with it: 89 to
+# 95 s on Kind, the Sentinels in TILT mode until Kubernetes drops that replica, then 30 s
+# more. A measure of the problem, not a target: a fix should bring it down to the bound above.
+MAX_CRASH_WITH_DNS_WRITE_GAP_SECONDS=${MAX_CRASH_WITH_DNS_WRITE_GAP_SECONDS:-120}
 OUTAGE_KEYS=2000
 EMPTY_POD_HEAD_START_SECONDS=180
 DNS_OUTAGE_SECONDS=60
+# How many times dns_outage looks at what a new client gets during the outage.
+DNS_OUTAGE_PROBES=4
 # An HAProxy pod started without cluster DNS must route within this delay once DNS answers.
 HAPROXY_ROUTES_AFTER_DNS_SECONDS=30
 # An isolated master must stop taking writes within this delay.
@@ -353,6 +359,35 @@ scenario_master_node_failure() {
   assert_report master_node_failure "$report" "$MAX_LOSS_ON_CRASH" "$MAX_CRASH_WRITE_GAP_SECONDS"
 }
 
+# The master's node dies with one of the two replicas of cluster DNS, as the scheduler of a
+# real cluster may place them. Until Kubernetes notices the node is gone, part of the name
+# lookups go to that replica and wait for their timeout. Sentinel looks names up on the
+# spot, and a stall over 2 s puts it in TILT mode for 30 s, when it neither votes a master
+# down nor fails over.
+scenario_master_node_failure_with_dns() {
+  local master node survivors since new_master report
+  master=$(current_master)
+  node=$(node_of "$master")
+  survivors=$(ordinals | grep -v -x "$master")
+  spread_cluster_dns_to "$node"
+  wait_healthy
+  since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  start_load nodedns
+  kill_nodes "$node"
+  new_master=$(NEW_MASTER_TIMEOUT_SECONDS=$MAX_CRASH_WITH_DNS_WRITE_GAP_SECONDS wait_for_new_master "$master")
+  sleep "$LOAD_AFTER_FAILURE_SECONDS"
+  # shellcheck disable=SC2086  # one argument per ordinal
+  printf '    master_node_failure_with_dns: the surviving Sentinels entered TILT mode %s times\n' \
+    "$(sentinel_tilts_since "$since" $survivors)"
+  start_nodes "$node"
+  pin_cluster_dns_to_control_plane
+  wait_healthy
+  [ "$(current_master)" = "$new_master" ] ||
+    fail "master_node_failure_with_dns: the master changed again"
+  report=$(finish_load nodedns)
+  assert_report master_node_failure_with_dns "$report" "$MAX_LOSS_ON_CRASH" "$MAX_CRASH_WITH_DNS_WRITE_GAP_SECONDS"
+}
+
 # The master pod is cut off from the network while it keeps running.
 scenario_master_partition() {
   local master report
@@ -392,14 +427,24 @@ scenario_master_isolated_from_peers() {
 }
 
 # Cluster DNS stops answering for a minute. Nothing else is wrong, so nothing may change:
-# same master, no write paused, nothing lost.
+# same master, no write paused, nothing lost. The load writes on connections opened before;
+# what a client that connects during the outage gets is printed, at a few moments.
 scenario_dns_outage() {
-  local master since report
+  local master since report endpoint probe
   master=$(current_master)
+  endpoint=$(k get service "$FULLNAME" -o jsonpath='{.spec.clusterIP}')
   since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   start_load dnsoutage
+  ensure_client_pod
   stop_cluster_dns
-  sleep "$DNS_OUTAGE_SECONDS"
+  for probe in $(seq 1 "$DNS_OUTAGE_PROBES"); do
+    sleep $((DNS_OUTAGE_SECONDS / DNS_OUTAGE_PROBES))
+    # By address: the client could not resolve the name of the Service either.
+    printf '    dns_outage: after %ss, a new connection gets [%s]; ready: HAProxy %s, Kvrocks %s\n' \
+      $((probe * DNS_OUTAGE_SECONDS / DNS_OUTAGE_PROBES)) \
+      "$(client_cli "\$CLI -h $endpoint set dns-$RUN_ID:probe$probe 1" | head -n 1)" \
+      "$(ready_pods haproxy)" "$(ready_pods kvrocks)"
+  done
   restore_cluster_dns
   wait_healthy
   [ "$(current_master)" = "$master" ] || fail "dns_outage: the master changed"
