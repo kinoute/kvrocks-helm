@@ -663,6 +663,51 @@ restore_cluster_dns() {
   COREDNS_REPLICAS=""
 }
 
+# Cluster DNS stays on the control plane, with the clients: the scenarios take workers down,
+# some for minutes, and only the scenarios about DNS are meant to take cluster DNS with them.
+# Kind starts CoreDNS there, but once dns_outage scaled it back up, the scheduler spread it
+# over the workers, and the pods of a worker restarted alone found no DNS at all. kubeadm's
+# CoreDNS already tolerates the control plane's taint.
+pin_cluster_dns_to_control_plane() {
+  kubectl -n kube-system patch deployment coredns --patch \
+    '{"spec":{"template":{"spec":{"nodeSelector":{"node-role.kubernetes.io/control-plane":""},"affinity":{"nodeAffinity":null},"topologySpreadConstraints":null}}}}' >/dev/null
+  kubectl -n kube-system rollout status deployment coredns --timeout=180s >/dev/null
+}
+
+# One replica of cluster DNS on the control plane and one on the given worker, as the
+# scheduler of a real cluster spreads them. Undone by pin_cluster_dns_to_control_plane.
+# A spread constraint rather than a required anti-affinity: the anti-affinity of the pods
+# left on the control plane would keep the pods pinned back there from ever starting.
+spread_cluster_dns_to() { # $1: worker node
+  local control_plane patch
+  control_plane=$(kubectl get nodes -l node-role.kubernetes.io/control-plane -o jsonpath='{.items[0].metadata.name}')
+  patch=$(jq -n --arg control_plane "$control_plane" --arg worker "$1" '{spec: {template: {spec: {
+    nodeSelector: null,
+    affinity: {nodeAffinity: {requiredDuringSchedulingIgnoredDuringExecution: {nodeSelectorTerms: [
+      {matchExpressions: [{key: "kubernetes.io/hostname", operator: "In", values: [$control_plane, $worker]}]}]}}},
+    topologySpreadConstraints: [{maxSkew: 1, topologyKey: "kubernetes.io/hostname",
+      whenUnsatisfiable: "DoNotSchedule", labelSelector: {matchLabels: {"k8s-app": "kube-dns"}},
+      matchLabelKeys: ["pod-template-hash"]}]}}}}')
+  kubectl -n kube-system patch deployment coredns --patch "$patch" >/dev/null
+  kubectl -n kube-system rollout status deployment coredns --timeout=180s >/dev/null
+}
+
+# Ready pods of one component of the release: "<ready>/<all>".
+ready_pods() { # $1: component (kvrocks, haproxy)
+  k get pods -l "app.kubernetes.io/instance=$RELEASE,app.kubernetes.io/component=$1" \
+    -o jsonpath='{range .items[*]}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' |
+    awk '$1 == "True" { ready++ } { all++ } END { printf "%d/%d", ready, all }'
+}
+
+# How many times the Sentinels of the given pods entered TILT mode since a moment.
+sentinel_tilts_since() { # $1: time (RFC 3339), then ordinals
+  local since=$1 ordinal
+  shift
+  for ordinal in "$@"; do
+    k logs "$(pod_name "$ordinal")" -c sentinel --since-time="$since" 2>/dev/null | grep -c '+tilt' || true
+  done | awk '{ total += $1 } END { print total + 0 }'
+}
+
 # Uninstalls the release and deletes its volumes: the next install starts from nothing.
 remove_release() {
   local ordinal
