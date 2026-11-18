@@ -233,11 +233,18 @@ describe_cluster() {
     k exec "$(pod_name "$ordinal")" -c kvrocks -- tail -n 6 /var/lib/kvrocks/handover.log 2>/dev/null |
       sed "s|^|    $(pod_name "$ordinal")/handover.log: |" | cut -c1-220
   done
+  # What each Sentinel did last. One in TILT mode stalls a handover without a word.
   for ordinal in $(ordinals); do
-    printf 'pod %s: role=%s master_link=%s sentinel_master=%s\n' "$ordinal" \
+    k logs "$(pod_name "$ordinal")" -c sentinel --tail=200 2>/dev/null |
+      grep -E 'tilt|failover|switch-master|sdown|odown' | tail -n 8 |
+      sed "s|^|    $(pod_name "$ordinal")/sentinel: |" | cut -c1-200
+  done
+  for ordinal in $(ordinals); do
+    printf 'pod %s: role=%s master_link=%s sentinel_master=%s sentinel_tilt=%s\n' "$ordinal" \
       "$(kv_exec "$ordinal" kvrocks 'kv_info_field localhost role')" \
       "$(kv_exec "$ordinal" kvrocks 'kv_info_field localhost master_link_status')" \
-      "$(kv_exec "$ordinal" sentinel 'sentinel_master localhost')"
+      "$(kv_exec "$ordinal" sentinel 'sentinel_master localhost')" \
+      "$(sentinel_tilt "$ordinal")"
   done
 }
 
