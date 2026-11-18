@@ -117,6 +117,25 @@ scenario_switchover_with_dead_replica() {
   assert_report switchover_with_dead_replica "$report" "$NO_LOSS" "$MAX_PLANNED_WRITE_GAP_SECONDS"
 }
 
+# The Sentinel of the master was stalled for a few seconds, as on a busy node, and went into
+# TILT mode. It still answers OK to a failover request, but runs no failover for 30 s. Asked
+# anyway, it would leave writes paused until the other Sentinels declare the master down.
+scenario_switchover_with_sentinel_in_tilt() {
+  local master report
+  master=$(current_master)
+  start_load tilt
+  stall_sentinel "$master" || fail "switchover_with_sentinel_in_tilt: could not stall the Sentinel"
+  [ "$(sentinel_tilt "$master")" = 1 ] ||
+    fail "switchover_with_sentinel_in_tilt: the stall did not put the Sentinel in TILT mode"
+  k exec "$(pod_name "$master")" -c kvrocks -- /scripts/kvrocks-switchover.sh ||
+    fail "switchover_with_sentinel_in_tilt: the handover script failed"
+  sleep "$LOAD_AFTER_FAILURE_SECONDS"
+  wait_healthy
+  [ "$(current_master)" != "$master" ] || fail "switchover_with_sentinel_in_tilt: the master did not change"
+  report=$(finish_load tilt)
+  assert_report switchover_with_sentinel_in_tilt "$report" "$NO_LOSS" "$MAX_PLANNED_WRITE_GAP_SECONDS"
+}
+
 # The master stops while a replica Sentinel could promote is behind: its preStop handover
 # gives up, and keeps writes paused until the pod is gone. The failover that follows must
 # promote the up-to-date replica and lose nothing.

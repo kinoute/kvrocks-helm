@@ -20,6 +20,7 @@ ALL_SCENARIOS=(
   switchover
   switchover_with_dead_replica
   switchover_with_lagging_replica
+  switchover_with_sentinel_in_tilt
   handover_aborted_on_stop
   plain_sentinel_failover
   rolling_update
@@ -55,6 +56,7 @@ CLUSTER_SCENARIOS=(
   tls_clients
   tls_enabled_later
   switchover
+  switchover_with_sentinel_in_tilt
   plain_sentinel_failover
   rolling_update
   upgrade_with_new_scripts

@@ -519,6 +519,22 @@ refuse_replication() { # $1: replica ordinal, $2: master ordinal
   PARTITION_RULES+=("$node $rule")
 }
 
+# Long enough to put Sentinel in TILT mode: it enters it after a stall of more than 2 s.
+SENTINEL_STALL_SECONDS=3
+
+# Freezes the Sentinel of a pod for a moment, as a busy node would.
+stall_sentinel() { # $1: ordinal
+  k exec "$(pod_name "$1")" -c sentinel -- sh -c "
+    pid=\$(pidof redis-sentinel)
+    kill -STOP \"\$pid\"
+    sleep $SENTINEL_STALL_SECONDS
+    kill -CONT \"\$pid\""
+}
+
+sentinel_tilt() { # $1: ordinal. Prints 1 while the Sentinel of that pod is in TILT mode.
+  kv_exec "$1" sentinel 'sentinel_cli localhost info sentinel | tr -d "\r" | sed -n "s/^sentinel_tilt://p"'
+}
+
 # Full syncs logged by the running Kvrocks container of a pod. A restarted container starts
 # from 0.
 pod_full_syncs() { # $1: ordinal
