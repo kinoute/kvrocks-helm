@@ -147,7 +147,7 @@ tests:
 
   # --- Sentinel ---
 
-  - it: defaults SENTINEL_QUORUM to 2 for 3 pods
+  - it: sets SENTINEL_QUORUM to the majority, 2 for 3 pods
     template: statefulset.yaml
     asserts:
       - contains:
@@ -156,7 +156,7 @@ tests:
             name: SENTINEL_QUORUM
             value: "2"
 
-  - it: defaults SENTINEL_QUORUM to 3 for 5 pods
+  - it: sets SENTINEL_QUORUM to the majority, 3 for 5 pods
     template: statefulset.yaml
     set:
       replicaCount: 5
@@ -167,7 +167,7 @@ tests:
             name: SENTINEL_QUORUM
             value: "3"
 
-  - it: defaults SENTINEL_QUORUM to a strict majority for an even number of pods
+  - it: sets SENTINEL_QUORUM to a strict majority for an even number of pods
     template: statefulset.yaml
     set:
       replicaCount: 4
@@ -177,18 +177,6 @@ tests:
           content:
             name: SENTINEL_QUORUM
             value: "3"
-
-  - it: uses sentinel.quorum when it is set
-    template: statefulset.yaml
-    set:
-      replicaCount: 5
-      sentinel.quorum: 4
-    asserts:
-      - contains:
-          path: spec.template.spec.initContainers[?(@.name == "sentinel")].env
-          content:
-            name: SENTINEL_QUORUM
-            value: "4"
 
   - it: passes the failover timings to sentinel
     template: statefulset.yaml

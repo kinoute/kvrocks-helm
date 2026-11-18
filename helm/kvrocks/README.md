@@ -146,7 +146,6 @@ For a release named `db`, with the default ports:
 | sentinel.masterName | string | `"kvrocks"` | Name Sentinel knows the master by; Sentinel-aware clients need it. |
 | sentinel.parallelSyncs | int | `1` | Replicas re-synced at the same time after a failover. |
 | sentinel.port | int | `26379` | Port of Sentinel. |
-| sentinel.quorum | string | a majority of the pods | Sentinels that must agree a master is down. |
 | sentinel.resources | object | `{}` | Resources of the Sentinel sidecar. |
 | service.annotations | object | `{}` | Annotations of the write Service. |
 | service.nodePort | string | `""` | Node port of the write endpoint, with `type: NodePort`. Empty lets Kubernetes pick. |
