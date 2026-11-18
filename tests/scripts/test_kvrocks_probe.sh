@@ -73,6 +73,65 @@ master_sync_in_progress:1"
   assert_eq 1 "$STATUS" "exit status"
 }
 
+# The master let it in at an old point of its log: the link is up, the writes are not there yet.
+test_a_replica_still_replaying_the_log_of_its_master_is_not_ready() {
+  promotable_replica
+  kvrocks_replica localhost kv-1.h 40
+  kvrocks_master kv-1.h 100
+  ready
+  assert_eq 1 "$STATUS" "exit status"
+}
+
+test_a_replica_that_reached_the_offset_of_its_master_is_ready() {
+  promotable_replica
+  kvrocks_replica localhost kv-1.h 100
+  kvrocks_master kv-1.h 100
+  ready
+  assert_eq 0 "$STATUS" "exit status"
+  assert_called "kv-1.h:6379 info replication"
+}
+
+# Under load, the replica has moved on since the offset of the master was read.
+test_a_replica_past_the_offset_read_on_its_master_is_ready() {
+  promotable_replica
+  kvrocks_replica localhost kv-1.h 120
+  kvrocks_master kv-1.h 100
+  ready
+  assert_eq 0 "$STATUS" "exit status"
+}
+
+# Under load again: a few writes short of the master at first, there on the next read.
+test_a_replica_that_reaches_its_master_on_another_read_is_ready() {
+  promotable_replica
+  kvrocks_master kv-1.h 100
+  handler localhost:6379 "info replication" <<'HANDLER'
+reads=$(cat "$WORLD/reads" 2>/dev/null || echo 0)
+echo $((reads + 1)) >"$WORLD/reads"
+offset=95
+[ "$reads" -lt 2 ] || offset=100
+printf 'role:slave\nmaster_host:kv-1.h\nmaster_link_status:up\nmaster_sync_in_progress:0\nslave_repl_offset:%s\n' "$offset"
+HANDLER
+  ready
+  assert_eq 0 "$STATUS" "exit status"
+}
+
+test_a_replica_whose_master_does_not_answer_is_ready_on_its_link() {
+  promotable_replica
+  kvrocks_replica localhost kv-1.h 40
+  hang kv-1.h:6379
+  ready
+  assert_eq 0 "$STATUS" "exit status"
+}
+
+# A master that restores a backup answers every command with an error.
+test_a_replica_whose_master_answers_an_error_is_ready_on_its_link() {
+  promotable_replica
+  kvrocks_replica localhost kv-1.h 40
+  reply kv-1.h:6379 "info replication" "ERR restoring the db from backup"
+  ready
+  assert_eq 0 "$STATUS" "exit status"
+}
+
 test_a_replica_without_its_master_is_not_ready() {
   promotable_replica
   kvrocks_replica localhost kv-1.h 100 down
