@@ -1,9 +1,14 @@
 # image: kvrocks
 # The readiness probe of the kvrocks container, on kv-0.
 
-ready() { # Sets STATUS.
+ready() { # Sets STATUS; what the probe printed goes to $WORLD/out.
   STATUS=0
-  timeout 10 /scripts/kvrocks-probe.sh readiness >/dev/null 2>&1 || STATUS=$?
+  timeout 10 /scripts/kvrocks-probe.sh readiness >"$WORLD/out" 2>&1 || STATUS=$?
+}
+
+assert_says() { # $1: text the probe must print, which Kubernetes shows in the pod's events
+  grep -q -F -- "$1" "$WORLD/out" || fail "expected [$1]; the probe printed:
+$(cat "$WORLD/out")"
 }
 
 # kv-0 replicates kv-1, and all three Sentinels could promote it.
@@ -32,6 +37,7 @@ test_a_replica_only_one_sentinel_could_promote_is_not_ready() {
   sentinel_replicas kv-2.h "kv-0.h slave 9000 100"
   ready
   assert_eq 1 "$STATUS" "exit status"
+  assert_says "not ready: 1 of the 3 Sentinels that answered could promote it, 2 needed"
 }
 
 test_a_replica_a_majority_could_promote_is_ready() {
@@ -41,7 +47,8 @@ test_a_replica_a_majority_could_promote_is_ready() {
   assert_eq 0 "$STATUS" "exit status"
 }
 
-# Some redis-cli exit 1 on an error reply: it is still an answer, and it says no.
+# The redis-cli of both images exits 0 on an error reply, but another may exit 1: it is still
+# an answer, and it says no.
 test_sentinels_that_answer_an_error_do_not_make_a_replica_ready() {
   promotable_replica
   for sentinel in localhost kv-1.h kv-2.h; do
@@ -71,6 +78,7 @@ master_link_status:up
 master_sync_in_progress:1"
   ready
   assert_eq 1 "$STATUS" "exit status"
+  assert_says "not ready: it is copying the whole database from the master kv-1.h"
 }
 
 # The master let it in at an old point of its log: the link is up, the writes are not there yet.
@@ -80,6 +88,7 @@ test_a_replica_still_replaying_the_log_of_its_master_is_not_ready() {
   kvrocks_master kv-1.h 100
   ready
   assert_eq 1 "$STATUS" "exit status"
+  assert_says "not ready: it holds offset 40, its master kv-1.h held 100 a moment ago"
 }
 
 test_a_replica_that_reached_the_offset_of_its_master_is_ready() {
@@ -137,6 +146,22 @@ test_a_replica_without_its_master_is_not_ready() {
   kvrocks_replica localhost kv-1.h 100 down
   ready
   assert_eq 1 "$STATUS" "exit status"
+  assert_says "not ready: its link to the master kv-1.h is down"
+}
+
+test_a_kvrocks_that_refuses_the_password_says_so() {
+  promotable_replica
+  reply localhost:6379 "info replication" "NOAUTH Authentication required."
+  ready
+  assert_eq 1 "$STATUS" "exit status"
+  assert_says "not ready: Kvrocks gives no role: NOAUTH Authentication required."
+}
+
+test_a_ready_replica_prints_nothing() {
+  promotable_replica
+  ready
+  assert_eq 0 "$STATUS" "exit status"
+  assert_eq "" "$(cat "$WORLD/out")" "output"
 }
 
 test_a_kvrocks_that_does_not_answer_is_not_ready() {
