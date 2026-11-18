@@ -51,7 +51,7 @@ When a master has to stop (rolling update, drain), its `preStop` hook hands the 
 2. It checks that every replica Sentinel could promote has received every write. Sentinel ranks replicas with offsets it read up to ten seconds earlier, so it may pick any of them.
 3. It asks Sentinel to fail over, keeps writes paused until the new master is announced, then demotes itself.
 
-If a replica is behind, the handover gives up and writes stay paused until the pod stops. The failover that follows is then slower, about 15 s instead of 3 s, but it promotes an up-to-date replica and loses nothing (scenario `handover_aborted_on_stop`).
+If a replica is behind, the handover gives up and writes stay paused until the pod stops. It gives up the same way when the master took a write the pause did not hold, or when the checks left too little of the pause for Sentinel to answer before it runs out. The failover that follows is then slower, about 15 s instead of 3 s, but it promotes an up-to-date replica and loses nothing (scenario `handover_aborted_on_stop`).
 
 The handover asks a Sentinel that is not in TILT mode. Sentinel goes into TILT for 30 s after it was stalled for more than 2 s, by a busy node for instance: it still answers OK to a failover request, but runs nothing, and writes would stay paused until the other Sentinels declare the master down. Only when every Sentinel is in TILT does the handover ask one all the same, and writes then stay paused until it leaves TILT (scenario `switchover_with_sentinel_in_tilt`).
 

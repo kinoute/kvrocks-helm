@@ -28,6 +28,8 @@ PROBE_TIMEOUT_SECONDS=0.5
 REQUEST_MARGIN_MS=2500
 # Sentinel answers a failover request at once, unless something blocks it for a moment.
 FAILOVER_REQUEST_TIMEOUT_SECONDS=1
+# Time to renew the write pause once Sentinel has answered the request.
+RENEWAL_MARGIN_MS=500
 DEMOTE_ATTEMPTS=30
 # Sentinel promotes the up-to-date replica with the lowest priority; the default is 100.
 TARGET_PRIORITY=1
@@ -333,7 +335,11 @@ if [ -n "$target" ]; then
 fi
 
 started=$(now_ms)
-deadline=$((started + SWITCHOVER_PAUSE_MS - REQUEST_MARGIN_MS))
+pause_ends=$((started + SWITCHOVER_PAUSE_MS))
+deadline=$((pause_ends - REQUEST_MARGIN_MS))
+# A write accepted once the pause runs out could miss the replica Sentinel promotes: the
+# pause must outlast the request and the renewal that follows it.
+latest_request=$((pause_ends - FAILOVER_REQUEST_TIMEOUT_SECONDS * 1000 - RENEWAL_MARGIN_MS))
 if ! pause_writes; then
   log "ERROR: this Kvrocks cannot pause writes (CLIENT PAUSE WRITE needs Kvrocks 2.16.0 or later), no handover"
   exit 1
@@ -353,6 +359,14 @@ candidates=$(promotion_candidates "$sentinel")
 if [ -z "$candidates" ] || ! all_caught_up "$target_offset" "$candidates"; then
   give_up "the replicas Sentinel could promote changed, and one of them is behind"
 fi
+# Kvrocks only holds the commands flagged as writes, and another one may still write: the
+# replicas were checked against the offset read when writes stopped, and no later.
+if [ "$(kv_info_field localhost master_repl_offset)" != "$target_offset" ]; then
+  give_up "this Kvrocks moved past offset $target_offset during the write pause"
+fi
+if [ "$(now_ms)" -ge "$latest_request" ]; then
+  give_up "the checks took too long: the write pause would run out before Sentinel answers"
+fi
 
 reply=$(
   CLI_TIMEOUT_SECONDS=$FAILOVER_REQUEST_TIMEOUT_SECONDS
@@ -364,7 +378,7 @@ case "$reply" in
   INPROG*) log "Sentinel is failing this master over already" ;;
   "")
     log "Sentinel did not answer the failover request in time"
-    if ! failover_started "$sentinel" "$((started + SWITCHOVER_PAUSE_MS))"; then
+    if ! failover_started "$sentinel" "$pause_ends"; then
       give_up "Sentinel did not start the failover"
     fi
     ;;
