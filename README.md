@@ -304,7 +304,20 @@ Measured on 2026-11-16 with `make e2e`, on a Kind cluster of 3 workers running i
 
 When the master's pod is deleted, Kubernetes recreates it within 3 s, on the same volume but with a new address. On Kind, the Sentinels reach it again before they declare it down and nothing fails over. When the node dies instead, Sentinel waits 10 s (`sentinel.downAfterMilliseconds`) then promotes a replica.
 
-That 16.5 s holds while cluster DNS runs elsewhere. When the node that dies also runs one of the replicas of CoreDNS, as the scheduler of a real cluster may place them, writes stopped for 89 to 95 s in four runs (scenario `master_node_failure_with_dns`). Sentinel resolves the names of the pods on the spot, and blocks while it does: until Kubernetes notices that the node is gone, part of its lookups go to the dead replica and wait for their timeout. Each stall over 2 s puts Sentinel in TILT mode, where it neither declares a master down nor fails over, until 30 s after the last one. A resolver timeout of 1 s in the pods' `dnsConfig` changed nothing (88.9 s). See [Caveats](#caveats).
+That 16.5 s holds while cluster DNS runs elsewhere. When the node that dies also runs one of the replicas of CoreDNS, as the scheduler of a real cluster may place them, writes stopped for 89 to 95 s in four runs (scenario `master_node_failure_with_dns`). Sentinel resolves the names of the pods on the spot, and blocks while it does: until Kubernetes notices that the node is gone, part of its lookups go to the dead replica and wait for their timeout. Each stall over 2 s puts Sentinel in TILT mode, where it neither declares a master down nor fails over, until 30 s after the last one. See [Caveats](#caveats).
+
+What was tried against it, on 2026-11-18, with the same scenario on a Kind cluster on a Linux host with 4 CPUs, two runs per line at most:
+
+| Tried | Longest interruption |
+| --- | ---: |
+| Nothing | 84.1 s |
+| A resolver timeout of 1 s in the pods' `dnsConfig` (on Docker Desktop) | 88.9 s |
+| `SENTINEL DEBUG tilt-trigger 6000`, a stall must last 6 s to put Sentinel in TILT | 90.8 s |
+| `SENTINEL DEBUG tilt-period 5000`, TILT lasts 5 s instead of 30 s | 64.6 s |
+| [NodeLocal DNSCache](https://kubernetes.io/docs/tasks/administer-cluster/nodelocaldns/) | 72.4 s, 20.8 s |
+| NodeLocal DNSCache with `prefetch` and `serve_stale` in its cache | 67.7 s, 20.7 s |
+
+Tuning TILT only shortens the wait that follows the stalls, which stay. The node-local cache helps when the names Sentinel looks up are in it: the second run of each pair went without a single TILT. The first one did not, and why is not known yet. None of these changed what a new client gets during a full DNS outage. The only sure way found is to keep CoreDNS off the nodes of the release: the failover is then the plain one above. No run lost more writes than a crash does.
 
 Where a vanished pod address drops packets instead of refusing them, as with Cilium, the Sentinels can stay stuck on the old address for longer than that, and fail over even though the pod came back. HAProxy, which resolves the new address at once, used to send writes to the recreated pod meanwhile, and those were lost with the failover: 1 848 acknowledged writes in one run on a real cluster. It now waits for a majority of Sentinels to reach the pod, so either they do in time and nothing fails over, or they fail over to a replica that holds every acknowledged write. See [On a real cluster](#on-a-real-cluster).
 
@@ -347,7 +360,7 @@ With data: `large_dataset` wrote 10 GiB shaped like a production workload, 30.4 
 
 ## Caveats
 
-- **Cluster DNS is on the failover path.** Sentinel resolves the names of the pods on the spot and blocks while it does. When the master's node dies with a replica of CoreDNS on it, writes stop for about 90 s instead of 16 s; during a cluster DNS outage, new connections are refused while open ones keep writing. See [What a failure costs](#what-a-failure-costs). Keeping CoreDNS off the nodes of the release avoids the first, where the cluster allows it.
+- **Cluster DNS is on the failover path.** Sentinel resolves the names of the pods on the spot and blocks while it does. When the master's node dies with a replica of CoreDNS on it, writes stop for about 90 s instead of 16 s; during a cluster DNS outage, new connections are refused while open ones keep writing. See [What a failure costs](#what-a-failure-costs) for what was tried. Keep CoreDNS off the nodes of the release where the cluster lets you, a node affinity on its Deployment for instance: that avoids the first case. NodeLocal DNSCache helps only part of the time, and nothing tried helps the second.
 - **Replication is asynchronous.** When the master crashes, the last writes it acknowledged and had not sent to a replica yet are lost.
 - **Fencing is not instant.** A master cut off from its peers keeps taking writes on the connections already open to it for about two seconds, the time the fencing loop waits before it concludes that the other pods no longer follow it. Those writes are lost.
 - **A slow start can cost a full sync.** A pod picks its role before RocksDB opens. If opening a large database takes longer than `sentinel.downAfterMilliseconds`, Sentinel may fail over meanwhile, and the pod starts as a master nobody routes to. Sentinel then demotes it, and it copies the whole database again. No write is lost.
