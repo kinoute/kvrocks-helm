@@ -53,6 +53,8 @@ When a master has to stop (rolling update, drain), its `preStop` hook hands the 
 
 If a replica is behind, the handover gives up and writes stay paused until the pod stops. The failover that follows is then slower, about 15 s instead of 3 s, but it promotes an up-to-date replica and loses nothing (scenario `handover_aborted_on_stop`).
 
+The handover asks a Sentinel that is not in TILT mode. Sentinel goes into TILT for 30 s after it was stalled for more than 2 s, by a busy node for instance: it still answers OK to a failover request, but runs nothing, and writes would stay paused until the other Sentinels declare the master down. Only when every Sentinel is in TILT does the handover ask one all the same, and writes then stay paused until it leaves TILT (scenario `switchover_with_sentinel_in_tilt`).
+
 A replica only becomes ready once it holds every write its master held a moment before, and once a majority of Sentinels could promote it.
 
 The first condition is there because the replication link says too little. When the master lets a replica resume from an old point of its write-ahead log, Kvrocks reports the link as up at once, while the replica still replays that log. Without the condition, a replica millions of writes behind would be ready: the read Service would send it reads, and a rolling update would move on to the next pod (scenario `replica_far_behind`). When the master does not answer, the link alone decides.
@@ -296,6 +298,8 @@ Three more scenarios write 2 000 keys, then kill every node at once and check th
 Two scenarios stop cluster DNS for a minute. In the first, nothing else is wrong and nothing changes: same master, no write paused, none lost. In the second, an HAProxy pod is replaced during the outage: it starts without the address of any pod, waits, and routed at most 5 s after DNS came back.
 
 One scenario refuses a replica its replication link while the master takes 3.8 million writes. Once the link is back, the replica replays them, and its readiness probe held the pod back for the 8 s that took.
+
+Another freezes the Sentinel of the master for 3 s, which puts it in TILT mode, then hands the master role over: 114 348 acknowledged writes, none lost, 4.2 s at most without one. When the handover still asked that Sentinel, writes stopped for 21.4 s.
 
 ### On a real cluster
 
