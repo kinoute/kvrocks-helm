@@ -303,11 +303,12 @@ Another freezes the Sentinel of the master for 3 s, which puts it in TILT mode, 
 
 ### On a real cluster
 
-Measured on 2026-11-16 with `make e2e-cluster`, on a managed Kubernetes 1.34 cluster of 3 nodes with 1.8 CPU and 6 GB each, Cilium and network block storage, clients over mutual TLS. Only the scenarios that leave the nodes alone run there, plus `node_upgrade`, which drains them one at a time (see [Upgrading Kubernetes](#upgrading-kubernetes)). The load is the same as on Kind; fewer writes go through because every one of them crosses a real network.
+Measured on 2026-11-16 with `make e2e-cluster`, the handover with a Sentinel in TILT on 2026-11-18, on a managed Kubernetes 1.34 cluster of 3 nodes with 1.8 CPU and 6 GB each, Cilium and network block storage, clients over mutual TLS. Only the scenarios that leave the nodes alone run there, plus `node_upgrade`, which drains them one at a time (see [Upgrading Kubernetes](#upgrading-kubernetes)). The load is the same as on Kind; fewer writes go through because every one of them crosses a real network.
 
 | Scenario | Acknowledged writes | Lost | Longest interruption |
 | --- | ---: | ---: | ---: |
 | Handover run by hand | 55 137 | 0 | 2.1 s |
+| Handover with the master's Sentinel in TILT | 84 564 | 0 | 2.1 s |
 | Plain `SENTINEL FAILOVER` | 46 482 | 2 668 | 2.2 s |
 | Rolling update | 171 372 | 0 | 3.8 s |
 | Upgrade that changes the scripts | 191 556 | 0 | 1.8 s |
