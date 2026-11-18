@@ -210,7 +210,7 @@ tests:
 
   # --- Routing ---
 
-  - it: routes writes to the pod that a quorum of Sentinels names as master
+  - it: routes writes to the pod that a majority of Sentinels names as master
     asserts:
       - matchRegex:
           path: data["haproxy.cfg"]
@@ -222,7 +222,7 @@ tests:
           path: data["haproxy.cfg"]
           pattern: 'frontend kvrocks_write\n(  .*\n)*?  use_backend kvrocks_2 if \{ nbsrv\(sentinel_votes_2\) ge 2 \}\n'
 
-  - it: refuses writes when no quorum agrees on a master
+  - it: refuses writes when no majority agrees on a master
     asserts:
       - matchRegex:
           path: data["haproxy.cfg"]
@@ -232,7 +232,7 @@ tests:
           path: data["haproxy.cfg"]
           pattern: '(?m)^backend no_master\n\n'
 
-  - it: requires the majority quorum of replicaCount in the routing rules
+  - it: requires a majority of replicaCount in the routing rules
     set:
       replicaCount: 5
     asserts:
@@ -242,26 +242,6 @@ tests:
       - notMatchRegex:
           path: data["haproxy.cfg"]
           pattern: '(?m)^  use_backend .* ge 2 \}$'
-
-  - it: routes on a majority of Sentinels even when sentinel.quorum is lower
-    set:
-      replicaCount: 5
-      sentinel.quorum: 2
-    asserts:
-      - matchRegex:
-          path: data["haproxy.cfg"]
-          pattern: '(?m)^  use_backend kvrocks_0 if \{ nbsrv\(sentinel_votes_0\) ge 3 \}$'
-      - notMatchRegex:
-          path: data["haproxy.cfg"]
-          pattern: '(?m)^  use_backend .* ge 2 \}$'
-
-  - it: routes on a majority of Sentinels even when sentinel.quorum is higher
-    set:
-      sentinel.quorum: 3
-    asserts:
-      - matchRegex:
-          path: data["haproxy.cfg"]
-          pattern: '(?m)^  use_backend kvrocks_0 if \{ nbsrv\(sentinel_votes_0\) ge 2 \}$'
 
   - it: keeps the last known pod addresses through a DNS outage
     set:
@@ -410,7 +390,7 @@ tests:
           path: data["haproxy.cfg"]
           pattern: '(?m)^  http-request return status 200 content-type text/plain string "alive" if \{ path /livez \}$'
 
-  - it: answers /readyz with 200 only while the master a quorum agrees on is reachable
+  - it: answers /readyz with 200 only while the master a majority agrees on is reachable
     asserts:
       - matchRegex:
           path: data["haproxy.cfg"]

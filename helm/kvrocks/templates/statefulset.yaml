@@ -102,7 +102,7 @@ spec:
           env:
             {{- include "kvrocks.topologyEnv" . | nindent 12 }}
             - name: SENTINEL_QUORUM
-              value: {{ include "kvrocks.quorum" . | quote }}
+              value: {{ include "kvrocks.majority" . | quote }}
             - name: SENTINEL_DOWN_AFTER_MS
               value: {{ .Values.sentinel.downAfterMilliseconds | int64 | quote }}
             - name: SENTINEL_PARALLEL_SYNCS

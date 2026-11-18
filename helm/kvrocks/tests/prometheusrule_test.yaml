@@ -165,7 +165,6 @@ tests:
     set:
       metrics.prometheusRule.enabled: true
       replicaCount: 5
-      sentinel.quorum: 2
     asserts:
       - matchRegex:
           path: spec.groups[0].rules[?(@.alert == "KvrocksWriteEndpointDown")].expr

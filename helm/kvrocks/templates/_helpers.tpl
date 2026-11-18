@@ -63,18 +63,11 @@ imagePullSecrets:
 {{- if include "kvrocks.isReplication" . }}{{ .Values.replicaCount }}{{ else }}1{{ end }}
 {{- end }}
 
-{{/* Sentinels that must agree: a majority of the pods unless set explicitly. */}}
-{{- define "kvrocks.quorum" -}}
-{{- if .Values.sentinel.quorum }}
-{{- .Values.sentinel.quorum }}
-{{- else }}
-{{- add (div (int .Values.replicaCount) 2) 1 }}
-{{- end }}
-{{- end }}
-
 {{/*
-Sentinels that must name the same pod before HAProxy sends it writes. Always a strict
-majority, whatever sentinel.quorum says: only one pod at a time can have a majority.
+Sentinels that must agree, both that the master is down (Sentinel's quorum) and on the pod
+HAProxy sends writes to. A strict majority: only one pod at a time can have one. A smaller
+quorum lets a single Sentinel start the failover of a healthy master; a larger one never
+fails over once the master's own Sentinel is gone with it.
 */}}
 {{- define "kvrocks.majority" -}}
 {{- add (div (int .Values.replicaCount) 2) 1 }}
@@ -239,10 +232,6 @@ would slip a reserved setting past the check below. The namespace tokens are cre
 {{- if include "kvrocks.isReplication" . }}
 {{- if lt (int .Values.replicaCount) 3 }}
 {{- fail "replication needs replicaCount >= 3: with fewer pods, losing one leaves no Sentinel majority" }}
-{{- end }}
-{{- $quorum := int (include "kvrocks.quorum" .) }}
-{{- if or (lt $quorum 1) (gt $quorum (int .Values.replicaCount)) }}
-{{- fail "sentinel.quorum must be between 1 and replicaCount: no more Sentinels than pods can agree" }}
 {{- end }}
 {{- /* A drain that stops more pods than this leaves no Sentinel majority, so no failover. */}}
 {{- $maxUnavailable := sub (int .Values.replicaCount) (int (include "kvrocks.majority" .)) }}

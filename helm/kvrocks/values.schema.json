@@ -651,12 +651,6 @@
           "minimum": 1,
           "type": "integer"
         },
-        "quorum": {
-          "type": [
-            "string",
-            "integer"
-          ]
-        },
         "resources": {
           "additionalProperties": true,
           "properties": {},

@@ -228,9 +228,6 @@ sentinel:
   port: 26379 # @schema minimum:1;maximum:65535
   # -- Name Sentinel knows the master by; Sentinel-aware clients need it.
   masterName: kvrocks # @schema pattern:^[A-Za-z0-9._-]+$
-  # -- Sentinels that must agree a master is down.
-  # @default -- a majority of the pods
-  quorum: "" # @schema type:[string,integer]
   # -- Milliseconds a master must be unreachable before Sentinel declares it down.
   # A crash failover takes a little longer than this.
   downAfterMilliseconds: 10000 # @schema minimum:1

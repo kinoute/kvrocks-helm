@@ -323,19 +323,6 @@ tests:
     asserts:
       - notFailedTemplate: {}
 
-  - it: refuses a quorum that more Sentinels than pods would have to reach
-    set:
-      sentinel.quorum: 4
-    asserts:
-      - failedTemplate:
-          errorMessage: "sentinel.quorum must be between 1 and replicaCount: no more Sentinels than pods can agree"
-
-  - it: accepts a quorum equal to the number of pods
-    set:
-      sentinel.quorum: 3
-    asserts:
-      - notFailedTemplate: {}
-
   - it: refuses a Kvrocks older than 2.16.0, which cannot pause writes for a handover
     set:
       image.tag: 2.15.0

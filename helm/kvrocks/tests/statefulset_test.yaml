@@ -124,7 +124,6 @@ tests:
     template: statefulset.yaml
     set:
       replicaCount: 5
-      sentinel.quorum: 2
     asserts:
       - equal:
           path: spec.template.spec.initContainers[?(@.name == "fence")].command
