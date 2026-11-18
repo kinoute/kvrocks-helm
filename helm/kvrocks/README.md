@@ -128,7 +128,7 @@ For a release named `db`, with the default ports:
 | podAnnotations | object | `{}` | Annotations of the Kvrocks pods. |
 | podAntiAffinity | string | `"hard"` | `hard`: one Kvrocks pod per node, or the pod stays Pending. Two pods on one node lose the Sentinel majority, and any failover, together with that node. `soft` only prefers it, for clusters with fewer nodes than pods. Ignored when `affinity` is set. |
 | podDisruptionBudget.enabled | bool | `true` | Creates a PodDisruptionBudget for the Kvrocks pods. |
-| podDisruptionBudget.maxUnavailable | int | `1` | Kvrocks pods a voluntary disruption, such as a drain, may stop at once. At most the pods beyond a majority: 1 out of 3, 2 out of 5. |
+| podDisruptionBudget.maxUnavailable | int | `1` | Kvrocks pods a voluntary disruption, such as a drain, may stop at once. At most 1, so that a drain leaves a majority of the three Sentinels. |
 | podLabels | object | `{}` | Labels of the Kvrocks pods. |
 | podSecurityContext | object | `{"fsGroup":999,"fsGroupChangePolicy":"OnRootMismatch","runAsGroup":999,"runAsNonRoot":true,"runAsUser":999,"seccompProfile":{"type":"RuntimeDefault"}}` | Security context of the Kvrocks pods. 999 is the user of the Kvrocks image. |
 | port | int | `6379` | Port clients reach Kvrocks on. With TLS it is the TLS port, and the traffic that stays inside the release (replication, Sentinel, probes, exporter) uses `tls.internalPort`. |
@@ -138,7 +138,7 @@ For a release named `db`, with the default ports:
 | readService.port | int | `6379` | Port of the read Service. |
 | readService.type | string | `"ClusterIP"` | Type of the read Service. |
 | readinessProbe | object | `{"failureThreshold":3,"periodSeconds":5,"timeoutSeconds":5}` | A replica is ready once it follows the master, has finished syncing and holds every write the master held a moment before. The Sentinel sidecar takes the same timings. |
-| replicaCount | int | `3` | Number of Kvrocks pods in `replication` mode: one master, the rest replicas. At least 3, so that a majority of Sentinels survives the loss of one pod. |
+| replicaCount | int | `3` | Number of Kvrocks pods in `replication` mode: one master and two replicas. Only 3 is accepted, the only count the failure scenarios run with. Ignored in `standalone` mode. |
 | resources | object | `{}` | Resources of the Kvrocks container. Without any, the pods run as BestEffort and are the first evicted under memory pressure. Kvrocks caches up to 4 GB of blocks by default (`rocksdb.block_cache_size` in `config`). |
 | sentinel.downAfterMilliseconds | int | `10000` | Milliseconds a master must be unreachable before Sentinel declares it down. A crash failover takes a little longer than this. |
 | sentinel.failoverTimeoutMilliseconds | int | `60000` | Milliseconds before Sentinel retries a failover that did not complete. |

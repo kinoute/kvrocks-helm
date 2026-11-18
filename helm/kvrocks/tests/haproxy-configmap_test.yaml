@@ -64,23 +64,6 @@ tests:
           path: data["haproxy.cfg"]
           pattern: (?m)^backend sentinel_votes_3$
 
-  - it: adds backends when replicaCount grows
-    set:
-      replicaCount: 5
-    asserts:
-      - matchRegex:
-          path: data["haproxy.cfg"]
-          pattern: (?m)^backend kvrocks_4$
-      - matchRegex:
-          path: data["haproxy.cfg"]
-          pattern: (?m)^backend sentinel_votes_4$
-      - notMatchRegex:
-          path: data["haproxy.cfg"]
-          pattern: (?m)^backend kvrocks_5$
-      - notMatchRegex:
-          path: data["haproxy.cfg"]
-          pattern: (?m)^backend sentinel_votes_5$
-
   # --- Pod addresses ---
 
   - it: reaches each Kvrocks by the fully qualified name of its pod
@@ -231,17 +214,6 @@ tests:
       - matchRegex:
           path: data["haproxy.cfg"]
           pattern: '(?m)^backend no_master\n\n'
-
-  - it: requires a majority of replicaCount in the routing rules
-    set:
-      replicaCount: 5
-    asserts:
-      - matchRegex:
-          path: data["haproxy.cfg"]
-          pattern: '(?m)^  use_backend kvrocks_4 if \{ nbsrv\(sentinel_votes_4\) ge 3 \}$'
-      - notMatchRegex:
-          path: data["haproxy.cfg"]
-          pattern: '(?m)^  use_backend .* ge 2 \}$'
 
   - it: keeps the last known pod addresses through a DNS outage
     set:

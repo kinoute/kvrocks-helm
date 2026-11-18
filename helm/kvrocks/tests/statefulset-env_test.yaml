@@ -76,14 +76,12 @@ tests:
 
   - it: sets KVROCKS_REPLICAS to replicaCount
     template: statefulset.yaml
-    set:
-      replicaCount: 5
     asserts:
       - contains:
           path: spec.template.spec.containers[?(@.name == "kvrocks")].env
           content:
             name: KVROCKS_REPLICAS
-            value: "5"
+            value: "3"
 
   - it: sets KVROCKS_REPLICAS to 1 in standalone mode
     template: statefulset.yaml
@@ -98,8 +96,6 @@ tests:
 
   - it: gives sentinel the same topology as kvrocks
     template: statefulset.yaml
-    set:
-      replicaCount: 5
     asserts:
       - contains:
           path: spec.template.spec.initContainers[?(@.name == "sentinel")].env
@@ -120,7 +116,7 @@ tests:
           path: spec.template.spec.initContainers[?(@.name == "sentinel")].env
           content:
             name: KVROCKS_REPLICAS
-            value: "5"
+            value: "3"
 
   - it: passes the ports and the Sentinel master name to the scripts
     template: statefulset.yaml
@@ -147,7 +143,7 @@ tests:
 
   # --- Sentinel ---
 
-  - it: sets SENTINEL_QUORUM to the majority, 2 for 3 pods
+  - it: sets the Sentinel quorum to the majority of the pods
     template: statefulset.yaml
     asserts:
       - contains:
@@ -155,28 +151,6 @@ tests:
           content:
             name: SENTINEL_QUORUM
             value: "2"
-
-  - it: sets SENTINEL_QUORUM to the majority, 3 for 5 pods
-    template: statefulset.yaml
-    set:
-      replicaCount: 5
-    asserts:
-      - contains:
-          path: spec.template.spec.initContainers[?(@.name == "sentinel")].env
-          content:
-            name: SENTINEL_QUORUM
-            value: "3"
-
-  - it: sets SENTINEL_QUORUM to a strict majority for an even number of pods
-    template: statefulset.yaml
-    set:
-      replicaCount: 4
-    asserts:
-      - contains:
-          path: spec.template.spec.initContainers[?(@.name == "sentinel")].env
-          content:
-            name: SENTINEL_QUORUM
-            value: "3"
 
   - it: passes the failover timings to sentinel
     template: statefulset.yaml

@@ -29,12 +29,11 @@ tests:
 
   - it: uses podDisruptionBudget.maxUnavailable
     set:
-      replicaCount: 5
-      podDisruptionBudget.maxUnavailable: 2
+      podDisruptionBudget.maxUnavailable: 0
     asserts:
       - equal:
           path: spec.maxUnavailable
-          value: 2
+          value: 0
 
   - it: is absent in standalone mode
     set:

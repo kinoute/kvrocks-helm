@@ -89,12 +89,12 @@ As of 2026-11-16 the chart is not published to a registry yet, so it installs fr
    helm test db
    ```
 
-**Important:** pick `replicaCount` and the password before you install. Changing either afterwards is not handled by the chart, see [Caveats](#caveats). TLS can be turned on later, but not on its default ports, see [TLS](#tls).
+**Important:** pick the password before you install: changing it afterwards takes a short write outage, see [Rotating the password](#rotating-the-password). TLS can be turned on later, but not on its default ports, see [TLS](#tls).
 
 Requirements:
 
 - Kubernetes 1.29 or later.
-- As many schedulable nodes as `replicaCount`: by default each Kvrocks pod needs a node of its own (`podAntiAffinity: hard`).
+- Three schedulable nodes: by default each of the three Kvrocks pods needs a node of its own (`podAntiAffinity: hard`).
 - Kvrocks 2.16.0 or later in `replication` mode, the first version with `CLIENT PAUSE WRITE`. The chart refuses an older `image.tag` it can read, and the handover script refuses to run on an older Kvrocks pinned by digest.
 - A password without whitespace, quotes or backslashes: HAProxy sends it in its health checks.
 
@@ -336,7 +336,7 @@ With data: `large_dataset` wrote 10 GiB shaped like a production workload, 30.4 
 - **Fencing has a cost.** A healthy master also stops taking writes when it is left without a majority of the pods, as when two pods out of three are down. HAProxy already refuses new connections in that case. Sentinels that are down while the replicas still follow the master do not pause it.
 - **A rolling update can move the master several times.** Kubernetes restarts the pods from the highest ordinal down, and Sentinel may hand the role to the next pod to restart. Each move pauses writes for about 3 s without losing any, but a rolling update can take up to three of them.
 - **Password rotation is not automatic.** Changing the Secret restarts nothing, and pods that restart later with the new password can no longer talk to the others. Follow [Rotating the password](#rotating-the-password).
-- **Changing `replicaCount` is not handled.** Scaling down in particular can remove the pod that is the master.
+- **Three pods, no more.** In `replication` mode the chart refuses any other `replicaCount`: the failure scenarios only run with three, and with more pods the handover holds its write pause across more Sentinels than it was measured with. Surviving two failures at once, with five pods, is not supported yet.
 - **TLS stops at the clients.** Replication and Sentinel run in clear inside the release. Encrypting them needs certificates that also carry the `clientAuth` usage: Kvrocks presents its server certificate as a client certificate when it replicates, and a `serverAuth`-only certificate is refused. It is the next thing I plan to add.
 - **Not tested behind a service mesh.**
 - **External replicas can be promoted.** Anything that attaches to the master as a replica, a backup job for instance, is seen by Sentinel as a candidate. Start it with `slave-priority 0`.

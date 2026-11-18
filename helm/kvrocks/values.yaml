@@ -17,8 +17,8 @@ global:
 # write endpoint. `standalone`: a single Kvrocks, no Sentinel, no HAProxy.
 architecture: replication # @schema enum:[replication,standalone]
 
-# -- Number of Kvrocks pods in `replication` mode: one master, the rest replicas.
-# At least 3, so that a majority of Sentinels survives the loss of one pod.
+# -- Number of Kvrocks pods in `replication` mode: one master and two replicas. Only 3 is
+# accepted, the only count the failure scenarios run with. Ignored in `standalone` mode.
 replicaCount: 3 # @schema minimum:1
 
 image:
@@ -180,8 +180,8 @@ readinessProbe: # @schema additionalProperties:true
 podDisruptionBudget:
   # -- Creates a PodDisruptionBudget for the Kvrocks pods.
   enabled: true
-  # -- Kvrocks pods a voluntary disruption, such as a drain, may stop at once. At most
-  # the pods beyond a majority: 1 out of 3, 2 out of 5.
+  # -- Kvrocks pods a voluntary disruption, such as a drain, may stop at once. At most 1,
+  # so that a drain leaves a majority of the three Sentinels.
   maxUnavailable: 1
 
 serviceAccount:

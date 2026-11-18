@@ -230,8 +230,12 @@ would slip a reserved setting past the check below. The namespace tokens are cre
 {{- end }}
 {{- end }}
 {{- if include "kvrocks.isReplication" . }}
-{{- if lt (int .Values.replicaCount) 3 }}
-{{- fail "replication needs replicaCount >= 3: with fewer pods, losing one leaves no Sentinel majority" }}
+{{- /*
+The failure scenarios only run with 3 pods: with more, the handover keeps its write pause
+across more Sentinels than it was measured with.
+*/}}
+{{- if ne (int .Values.replicaCount) 3 }}
+{{- fail "replication runs exactly 3 pods (replicaCount: 3): the failure scenarios cover no other count" }}
 {{- end }}
 {{- /* A drain that stops more pods than this leaves no Sentinel majority, so no failover. */}}
 {{- $maxUnavailable := sub (int .Values.replicaCount) (int (include "kvrocks.majority" .)) }}
