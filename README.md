@@ -221,6 +221,16 @@ To restore, follow the migration above with the backup as the data, keeping only
 
 A new version of the chart restarts the pods only when it changes what they run: an image, the configuration of Kvrocks or of HAProxy, or the scripts. The rolling update then restarts every Kvrocks pod, with one handover of the master. A version that changes none of these, a new alert rule for instance, restarts nothing: test `tests/chart/pod-templates.sh` checks it on every change.
 
+Some values cannot change once the release is installed. Kubernetes refuses any change to the volume claims of a StatefulSet, so `helm upgrade` fails on a new `persistence.size`, `persistence.storageClass` or `persistence.accessModes`. `nameOverride` and `fullnameOverride` rename every resource and change the selector of the StatefulSet. The port in clear has its own section under [TLS](#tls).
+
+To grow the volumes all the same, when the StorageClass has `allowVolumeExpansion: true` (no scenario covers this):
+
+1. Patch each claim to the new size, for instance `kubectl patch pvc data-db-kvrocks-0 -p '{"spec":{"resources":{"requests":{"storage":"50Gi"}}}}'`, and wait until `kubectl get pvc` shows it.
+2. Delete the StatefulSet but not its pods: `kubectl delete statefulset db-kvrocks --cascade=orphan`. The pods keep running and serving.
+3. Run `helm upgrade` with the new `persistence.size`. The new StatefulSet takes the running pods over without restarting them.
+
+Avoid automatic rollbacks: `helm upgrade --rollback-on-failure` (`--atomic` before Helm 4), or a GitOps tool set to roll back a failed upgrade, takes a release whose new Kvrocks pods are slow to become ready back to the previous image, and Kvrocks does not support going back to an older version. A large volume can take longer to open than Helm waits by default (5 minutes); the startup probe allows 20.
+
 ### Upgrading Kvrocks
 
 1. Read the release notes of every version in between, for a change in the data format or in replication. Kvrocks publishes no compatibility promise between versions, and going back to an older version is not supported.
