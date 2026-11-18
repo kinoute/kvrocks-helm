@@ -195,7 +195,7 @@ A full sync happens when a former master comes back with writes the new master n
 
 With 10 GiB written on a real cluster (see [On a real cluster](#on-a-real-cluster)), each pod held 13.6 GB of data and, right after the writes, 12 to 15 GB of archived log on top of it. A full sync of those 13.6 GB took 5 minutes. As a rule of thumb, give each volume twice the data plus 16 GB.
 
-Set `resources` too: with none, the pods run as BestEffort and are the first evicted under memory pressure.
+Set `resources` too: with none, the pods run as BestEffort and are the first evicted under memory pressure. With a memory limit, lower the block cache in `config` as well: Kvrocks caches up to 4 GB of blocks by default (`rocksdb.block_cache_size`, in MB), on top of its write buffers, and a master killed for lack of memory hands nothing over. The scenarios run on a real cluster with `rocksdb.block_cache_size: 1024` under a 3 GiB limit.
 
 ### Migrating from a standalone Kvrocks
 
