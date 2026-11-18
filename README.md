@@ -53,7 +53,11 @@ When a master has to stop (rolling update, drain), its `preStop` hook hands the 
 
 If a replica is behind, the handover gives up and writes stay paused until the pod stops. The failover that follows is then slower, about 15 s instead of 3 s, but it promotes an up-to-date replica and loses nothing (scenario `handover_aborted_on_stop`).
 
-A replica only becomes ready once a majority of Sentinels could promote it. After a restart, Sentinel needs a DNS answer with the new address of the pod before it can reach it again, which took about 15 s in one Kind run where I timed it. Without that condition, a rolling update would stop the master while no Sentinel could promote the replica that had just restarted. When fewer than a majority of Sentinels answer at all, as during a DNS outage, every one that answers must be able to promote it.
+A replica only becomes ready once it holds every write its master held a moment before, and once a majority of Sentinels could promote it.
+
+The first condition is there because the replication link says too little. When the master lets a replica resume from an old point of its write-ahead log, Kvrocks reports the link as up at once, while the replica still replays that log. Without the condition, a replica millions of writes behind would be ready: the read Service would send it reads, and a rolling update would move on to the next pod (scenario `replica_far_behind`). When the master does not answer, the link alone decides.
+
+The second is there because, after a restart, Sentinel needs a DNS answer with the new address of the pod before it can reach it again, which took about 15 s in one Kind run where I timed it. Without it, a rolling update would stop the master while no Sentinel could promote the replica that had just restarted. When fewer than a majority of Sentinels answer at all, as during a DNS outage, every one that answers must be able to promote it.
 
 ## Installation
 
@@ -185,7 +189,7 @@ Each pod holds a full copy of the data. Give its volume at least twice the size 
 - a full sync downloads a complete checkpoint before it replaces the old database, so a replica needs room for both copies at once ([`storage.cc`](https://github.com/apache/kvrocks/blob/v2.17.0/src/storage/storage.cc));
 - every pod keeps its write-ahead log for replicas that fall behind, up to `rocksdb.wal_size_limit_mb` (16 GB by default) or `rocksdb.wal_ttl_seconds` (3 h). After a burst of writes, that log weighs as much as what was written.
 
-A full sync happens when a former master comes back with writes the new master never got, and when a pod is new or lost its volume. In that second case, a master whose write-ahead log still goes back to its first write has the pod replay that log instead ([`cmd_replication.cc`](https://github.com/apache/kvrocks/blob/v2.17.0/src/commands/cmd_replication.cc)): that only lasts until the log reaches one of the two limits above. The duration of a full sync grows with the data.
+A full sync happens when a former master comes back with writes the new master never got, and when a pod is new or lost its volume. In that second case, a master whose write-ahead log still goes back to its first write has the pod replay that log instead ([`cmd_replication.cc`](https://github.com/apache/kvrocks/blob/v2.17.0/src/commands/cmd_replication.cc)): that only lasts until the log reaches one of the two limits above. The pod is not ready before it has replayed it all. The duration of a full sync grows with the data.
 
 With 10 GiB written on a real cluster (see [On a real cluster](#on-a-real-cluster)), each pod held 13.6 GB of data and, right after the writes, 12 to 15 GB of archived log on top of it. A full sync of those 13.6 GB took 5 minutes. As a rule of thumb, give each volume twice the data plus 16 GB.
 
