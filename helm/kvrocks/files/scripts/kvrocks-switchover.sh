@@ -68,22 +68,42 @@ promotion_candidates() ( # $1: Sentinel host. A subshell: the timeout stays loca
   promotable_replicas "$1"
 )
 
+# Sentinel goes into TILT mode for 30 s after it was stalled for more than 2 s, by a busy
+# node for instance. It still answers then, OK to a failover request too, but runs nothing.
+sentinel_in_tilt() { # $1: Sentinel host
+  local tilt
+  tilt=$(
+    CLI_TIMEOUT_SECONDS=$PROBE_TIMEOUT_SECONDS
+    sentinel_cli "$1" info sentinel | tr -d '\r' | sed -n 's/^sentinel_tilt://p'
+  )
+  [ "$tilt" = 1 ]
+}
+
 # The Sentinel that will run the failover: among those that name this pod as master, the
-# one that could promote the most replicas.
+# one that could promote the most replicas. One in TILT mode would start the failover only
+# when it leaves TILT, writes paused until then: it is picked only when all of them are.
 pick_sentinel() {
-  local host master count best="" best_count=0
+  local host master count best="" best_count=0 tilted=""
   for host in localhost $(peer_fqdns); do
     master=$(
       CLI_TIMEOUT_SECONDS=$PROBE_TIMEOUT_SECONDS
       sentinel_master "$host"
     )
     [ "$master" = "$(self_fqdn)" ] || continue
+    if sentinel_in_tilt "$host"; then
+      tilted=${tilted:-$host}
+      continue
+    fi
     count=$(promotion_candidates "$host" | wc -l)
     if [ -z "$best" ] || [ "$count" -gt "$best_count" ]; then
       best=$host
       best_count=$count
     fi
   done
+  if [ -z "$best" ] && [ -n "$tilted" ]; then
+    log "every Sentinel that names this pod as master is in TILT mode: writes stay paused until $tilted leaves it, up to 30 s"
+    best=$tilted
+  fi
   [ -n "$best" ] || return 1
   printf '%s\n' "$best"
 }
