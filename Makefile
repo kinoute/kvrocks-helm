@@ -13,9 +13,11 @@ RENDER := helm template kv $(CHART) --set auth.password=lint
 KUBECONFORM := kubeconform -strict -summary -schema-location default -schema-location \
 	'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
 
-# The scenarios worth running on every change. Node failures, the network partition and
-# volume losses only run in the full suite.
-QUICK_SCENARIOS := install switchover rolling_update master_pod_crash tls_clients helm_test
+# The scenarios worth running on every change, the fencing of an isolated master and the
+# guard against an empty volume included: a change that breaks either must not wait for
+# the full suite on main to show. Node failures, the full outages and DNS only run there.
+QUICK_SCENARIOS := install switchover rolling_update master_pod_crash master_isolated_from_peers \
+	master_volume_loss tls_clients helm_test
 
 .PHONY: test lint schema docs manifests unit scripts rules loadgen e2e e2e-quick e2e-cluster
 
