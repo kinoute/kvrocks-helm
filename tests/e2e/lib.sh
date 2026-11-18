@@ -395,6 +395,44 @@ write_keys() { # $1: prefix, $2: count
 $(grep -v -x OK <<<"$replies" | sort | uniq -c)"
 }
 
+# How long writing a dataset may take per GiB, generously.
+DATASET_SECONDS_PER_GIB=900
+
+# Writes data shaped like a production workload through the write endpoint.
+write_dataset() { # $1: scenario, $2: size in GiB
+  local write_timeout
+  k delete pod dataset --ignore-not-found >/dev/null
+  k apply -f - >/dev/null <<EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: dataset
+  labels:
+    app: loadgen
+spec:
+  restartPolicy: Never
+$(client_pod_spec)
+  containers:
+    - name: dataset
+      image: $LOADGEN_IMAGE
+      imagePullPolicy: $LOADGEN_PULL_POLICY
+      command: ["/app/.venv/bin/python", "/app/dataset.py"]
+      args: ["--host=$FULLNAME", "--gigabytes=$2", "--seed=$RUN_ID"]
+      env:
+        - name: KVROCKS_PASSWORD
+          value: "$(password)"
+        - name: KVROCKS_TLS
+          value: "$E2E_TLS"
+$(client_mounts)
+EOF
+  # The size may be a fraction of a GiB: bash has no floating point.
+  write_timeout=$(awk -v gib="$2" -v per="$DATASET_SECONDS_PER_GIB" \
+    'BEGIN { print int(gib * per) + 60 }')
+  k wait --for=jsonpath='{.status.phase}'=Succeeded pod/dataset --timeout="${write_timeout}s" \
+    >/dev/null || fail "$1: the dataset was not written: $(k logs dataset --tail=5 2>&1)"
+  printf '    %s: written %s\n' "$1" "$(k logs dataset | tail -n 1)"
+}
+
 # Counts how many of the keys <prefix>:1..<count> a host holds: the write endpoint through
 # the client pod, a Kvrocks pod on its port in clear, from inside the release.
 count_keys() { # $1: host, $2: prefix, $3: count
@@ -424,7 +462,7 @@ drop_traffic() { # $1: node, then the iptables match
   local node=$1
   shift
   docker exec "$node" iptables -I FORWARD "$@" -j DROP
-  PARTITION_RULES+=("$node $*")
+  PARTITION_RULES+=("$node $* -j DROP")
 }
 
 heal_partition() {
@@ -432,8 +470,8 @@ heal_partition() {
   [ "${#PARTITION_RULES[@]}" -gt 0 ] || return 0
   for rule in "${PARTITION_RULES[@]}"; do
     node=${rule%% *}
-    # shellcheck disable=SC2086  # the match is a list of iptables arguments
-    docker exec "$node" iptables -D FORWARD ${rule#* } -j DROP 2>/dev/null || true
+    # shellcheck disable=SC2086  # the rule is a list of iptables arguments
+    docker exec "$node" iptables -D FORWARD ${rule#* } 2>/dev/null || true
   done
   PARTITION_RULES=()
 }
@@ -468,6 +506,17 @@ isolate_from_peers() { # $1: ordinal
 # sees it alive, so it stays a candidate for promotion.
 cut_replication() { # $1: replica ordinal, $2: master ordinal
   drop_traffic "$(node_of "$1")" -s "$(pod_ip "$1")" -d "$(pod_ip "$2")" -p tcp --dport "$INTERNAL_PORT"
+}
+
+# The same cut, answered with a TCP reset instead of silence. Kvrocks takes two minutes to
+# notice a link that went silent, and is back a second after one that was refused.
+refuse_replication() { # $1: replica ordinal, $2: master ordinal
+  local node rule
+  node=$(node_of "$1")
+  rule="-s $(pod_ip "$1") -d $(pod_ip "$2") -p tcp --dport $INTERNAL_PORT -j REJECT --reject-with tcp-reset"
+  # shellcheck disable=SC2086  # the rule is a list of iptables arguments
+  docker exec "$node" iptables -I FORWARD $rule
+  PARTITION_RULES+=("$node $rule")
 }
 
 # Full syncs logged by the running Kvrocks container of a pod. A restarted container starts

@@ -291,6 +291,8 @@ Three more scenarios write 2 000 keys, then kill every node at once and check th
 
 Two scenarios stop cluster DNS for a minute. In the first, nothing else is wrong and nothing changes: same master, no write paused, none lost. In the second, an HAProxy pod is replaced during the outage: it starts without the address of any pod, waits, and routed at most 5 s after DNS came back.
 
+One scenario refuses a replica its replication link while the master takes 3.8 million writes. Once the link is back, the replica replays them, and its readiness probe held the pod back for the 8 s that took.
+
 ### On a real cluster
 
 Measured on 2026-11-16 with `make e2e-cluster`, on a managed Kubernetes 1.34 cluster of 3 nodes with 1.8 CPU and 6 GB each, Cilium and network block storage, clients over mutual TLS. Only the scenarios that leave the nodes alone run there, plus `node_upgrade`, which drains them one at a time (see [Upgrading Kubernetes](#upgrading-kubernetes)). The load is the same as on Kind; fewer writes go through because every one of them crosses a real network.

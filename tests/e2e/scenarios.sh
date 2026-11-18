@@ -30,9 +30,11 @@ MAX_LOSS_ON_PLAIN_FAILOVER=${MAX_LOSS_ON_PLAIN_FAILOVER:-30000}
 NODE_UPGRADE_SECONDS=${NODE_UPGRADE_SECONDS:-30}
 # The oldest Kvrocks the chart supports in replication mode, upgraded by kvrocks_upgrade.
 KVROCKS_UPGRADE_FROM=${KVROCKS_UPGRADE_FROM:-2.16.0}
-# Size of the data large_dataset writes, and how long it may take per GiB, generously.
+# Size of the data large_dataset writes.
 E2E_DATASET_GIB=${E2E_DATASET_GIB:-1}
-DATASET_SECONDS_PER_GIB=900
+# What replica_far_behind writes while a replica is cut off: enough for that replica to need
+# seconds to catch up.
+FAR_BEHIND_DATASET_GIB=0.25
 # A replica must be back in sync on the whole dataset within this delay, volume lost or not.
 LARGE_DATASET_TIMEOUT_SECONDS=${LARGE_DATASET_TIMEOUT_SECONDS:-3600}
 
@@ -413,6 +415,42 @@ scenario_haproxy_starts_without_dns() {
   wait_healthy
 }
 
+# A replica cut off from its master while it took millions of writes resumes where it had
+# stopped. Kvrocks calls its link up at once, while it still replays those writes. The
+# readiness probe must hold the pod back until it has them: a rolling update would move on
+# to the next pod, the master maybe, and the read Service would serve a replica that is far
+# behind. The probe is run here, over and over, rather than read from the pod's status:
+# the kubelet runs it every few seconds only, and could miss the whole replay.
+scenario_replica_far_behind() {
+  local master replica before target answer offset healed deadline
+  master=$(current_master)
+  replica=$(((master + 1) % REPLICAS))
+  before=$(kv_exec "$replica" kvrocks 'kv_info_field localhost slave_repl_offset')
+  refuse_replication "$replica" "$master"
+  write_dataset replica_far_behind "$FAR_BEHIND_DATASET_GIB"
+  target=$(kv_exec "$master" kvrocks 'kv_info_field localhost master_repl_offset')
+  heal_partition
+  healed=$SECONDS
+  deadline=$((SECONDS + HEALTHY_TIMEOUT_SECONDS))
+  while :; do
+    # The offset is read after the probe ran: a probe that says ready on a replica still
+    # short of the target then has no excuse.
+    answer=$(kv_exec "$replica" kvrocks '
+      if /scripts/kvrocks-probe.sh readiness >/dev/null 2>&1; then echo ready; else echo behind; fi
+      kv_info_field localhost slave_repl_offset') || true
+    offset=$(tail -n 1 <<<"$answer")
+    if [ "$(head -n 1 <<<"$answer")" = "ready" ]; then
+      [ "${offset:-0}" -ge "$target" ] ||
+        fail "replica_far_behind: the probe called the replica ready $((target - ${offset:-0})) writes short of its master"
+      break
+    fi
+    [ "$SECONDS" -lt "$deadline" ] || fail "replica_far_behind: the replica did not catch up"
+  done
+  printf '    replica_far_behind: the probe held the replica back for %ss, until it had the %s writes it had missed\n' \
+    $((SECONDS - healed)) $((target - before))
+  wait_healthy
+}
+
 # A replica loses its disk: it must come back empty and copy everything again.
 scenario_replica_volume_loss() {
   local master replica report
@@ -652,37 +690,8 @@ scenario_standalone() {
 # An empty replica does not always copy the files of the master: while the master still holds
 # its whole write-ahead log, the replica replays it instead. Each measure says which it was.
 scenario_large_dataset() {
-  local master replica started write_timeout
-  k delete pod dataset --ignore-not-found >/dev/null
-  k apply -f - >/dev/null <<EOF
-apiVersion: v1
-kind: Pod
-metadata:
-  name: dataset
-  labels:
-    app: loadgen
-spec:
-  restartPolicy: Never
-$(client_pod_spec)
-  containers:
-    - name: dataset
-      image: $LOADGEN_IMAGE
-      imagePullPolicy: $LOADGEN_PULL_POLICY
-      command: ["/app/.venv/bin/python", "/app/dataset.py"]
-      args: ["--host=$FULLNAME", "--gigabytes=$E2E_DATASET_GIB", "--seed=$RUN_ID"]
-      env:
-        - name: KVROCKS_PASSWORD
-          value: "$(password)"
-        - name: KVROCKS_TLS
-          value: "$E2E_TLS"
-$(client_mounts)
-EOF
-  # The size may be a fraction of a GiB: bash has no floating point.
-  write_timeout=$(awk -v gib="$E2E_DATASET_GIB" -v per="$DATASET_SECONDS_PER_GIB" \
-    'BEGIN { print int(gib * per) + 60 }')
-  k wait --for=jsonpath='{.status.phase}'=Succeeded pod/dataset --timeout="${write_timeout}s" \
-    >/dev/null || fail "large_dataset: the dataset was not written: $(k logs dataset --tail=5 2>&1)"
-  printf '    large_dataset: written %s\n' "$(k logs dataset | tail -n 1)"
+  local master replica started
+  write_dataset large_dataset "$E2E_DATASET_GIB"
   wait_healthy
   print_disk_usage
 

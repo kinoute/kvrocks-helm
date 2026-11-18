@@ -34,6 +34,7 @@ ALL_SCENARIOS=(
   master_isolated_from_peers
   dns_outage
   haproxy_starts_without_dns
+  replica_far_behind
   replica_volume_loss
   master_volume_loss
   full_outage
