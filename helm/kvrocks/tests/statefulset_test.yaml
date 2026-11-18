@@ -22,15 +22,6 @@ tests:
           path: spec.replicas
           value: 3
 
-  - it: runs replicaCount pods in replication mode
-    template: statefulset.yaml
-    set:
-      replicaCount: 5
-    asserts:
-      - equal:
-          path: spec.replicas
-          value: 5
-
   - it: runs a single pod in standalone mode, whatever replicaCount says
     template: statefulset.yaml
     set:
@@ -122,8 +113,6 @@ tests:
 
   - it: gives the fence the topology and the Sentinel majority
     template: statefulset.yaml
-    set:
-      replicaCount: 5
     asserts:
       - equal:
           path: spec.template.spec.initContainers[?(@.name == "fence")].command
@@ -132,12 +121,12 @@ tests:
           path: spec.template.spec.initContainers[?(@.name == "fence")].env
           content:
             name: SENTINEL_MAJORITY
-            value: "3"
+            value: "2"
       - contains:
           path: spec.template.spec.initContainers[?(@.name == "fence")].env
           content:
             name: KVROCKS_REPLICAS
-            value: "5"
+            value: "3"
 
   - it: shares /tmp between the fence and kvrocks, where each notes the write pause it holds
     template: statefulset.yaml

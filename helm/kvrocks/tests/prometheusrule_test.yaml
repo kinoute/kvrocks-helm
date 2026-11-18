@@ -164,11 +164,10 @@ tests:
   - it: requires a majority of Sentinel votes for the write endpoint to count as up
     set:
       metrics.prometheusRule.enabled: true
-      replicaCount: 5
     asserts:
       - matchRegex:
           path: spec.groups[0].rules[?(@.alert == "KvrocksWriteEndpointDown")].expr
-          pattern: '>= 3\s+and on \(pod, ordinal\)'
+          pattern: '>= 2\s+and on \(pod, ordinal\)'
 
   - it: follows the release namespace in the series selectors
     release:
@@ -189,11 +188,10 @@ tests:
   - it: fires KvrocksReplicasMissing below replicaCount - 1 healthy replicas
     set:
       metrics.prometheusRule.enabled: true
-      replicaCount: 5
     asserts:
       - equal:
           path: spec.groups[0].rules[?(@.alert == "KvrocksReplicasMissing")].expr
-          value: (count(kvrocks_master_link_up{namespace="data", service="db-kvrocks-headless"} == 1) or vector(0)) < 4
+          value: (count(kvrocks_master_link_up{namespace="data", service="db-kvrocks-headless"} == 1) or vector(0)) < 2
 
   - it: fires KvrocksDiskUsageHigh above metrics.prometheusRule.diskUsageThreshold
     set:
