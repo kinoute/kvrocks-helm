@@ -42,6 +42,8 @@ ALL_SCENARIOS=(
   full_outage
   stale_master_starts_first
   empty_first_pod_after_outage
+  restore_from_replica_snapshot
+  password_rotation
   tls_clients
   tls_enabled_later
   network_policy
@@ -66,6 +68,8 @@ CLUSTER_SCENARIOS=(
   master_pod_crash
   replica_volume_loss
   master_volume_loss
+  restore_from_replica_snapshot
+  password_rotation
   network_policy
   install_from_existing_data
   standalone

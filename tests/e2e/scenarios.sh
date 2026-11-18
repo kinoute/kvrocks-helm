@@ -629,6 +629,81 @@ scenario_empty_first_pod_after_outage() {
   assert_keys_everywhere empty_first_pod_after_outage beforeloss "$OUTAGE_KEYS"
 }
 
+# The release is lost and comes back from the volume of a replica, restored in place as the
+# README says: only db/. That volume also holds the view of its Sentinel, which names the
+# master of the time; pod 0 restored with it would follow that pod, empty after the reinstall.
+scenario_restore_from_replica_snapshot() {
+  local replica backup="$REPO_ROOT/.e2e/restore-$RUN_ID.tar"
+  write_keys restore "$OUTAGE_KEYS"
+  # The case that matters: the saved view names a master other than pod 0.
+  make_master 1
+  replica=2
+  assert_keys_everywhere restore_before restore "$OUTAGE_KEYS"
+  # The whole volume, as a snapshot holds it. GNU tar exits 1 on a file that changed while it
+  # read it, as the log of a running Sentinel may: the files that matter here are idle.
+  k exec "$(pod_name "$replica")" -c kvrocks -- sh -c 'tar -C /var/lib/kvrocks -cf - .; [ $? -le 1 ]' \
+    >"$backup" || fail "restore_from_replica_snapshot: could not copy the volume of pod $replica"
+  remove_release
+  k apply -f - >/dev/null <<EOF
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: data-$(pod_name 0)
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: $(helm template "$RELEASE" "$REPO_ROOT/helm/kvrocks" "${HELM_VALUES[@]}" | awk '$1 == "storage:" { print $2; exit }')
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: restore
+spec:
+  securityContext:
+    runAsUser: 999
+    fsGroup: 999
+  containers:
+    - name: restore
+      image: $(kvrocks_image)
+      command: ["sleep", "infinity"]
+      volumeMounts:
+        - name: data
+          mountPath: /data
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: data-$(pod_name 0)
+EOF
+  k wait --for=condition=Ready pod/restore --timeout=180s >/dev/null ||
+    fail "restore_from_replica_snapshot: the restore pod did not start"
+  k exec -i restore -- tar -C /data -xf - ./db <"$backup" ||
+    fail "restore_from_replica_snapshot: could not restore db/"
+  rm -f "$backup"
+  k delete pod restore --wait=true >/dev/null
+  scenario_install
+  [ "$(current_master)" = "0" ] ||
+    fail "restore_from_replica_snapshot: pod 0, which holds the restored data, should be the master"
+  assert_keys_everywhere restore_from_replica_snapshot restore "$OUTAGE_KEYS"
+}
+
+# The README's rotation: the Secret changes, which restarts nothing, then every pod of the
+# release is deleted at once. They come back with the new password and pick the master from
+# what they saved; the old password is refused. Then back to the first password, so that the
+# scenarios after this one keep the values they run with.
+scenario_password_rotation() {
+  local first
+  first=$(password)
+  write_keys rotation "$OUTAGE_KEYS"
+  wait_healthy
+  rotate_password "r0t%ted&$RUN_ID"
+  assert_keys_everywhere password_rotation rotation "$OUTAGE_KEYS"
+  [ "$(client_cli "REDISCLI_AUTH='$first' \$CLI ping" | head -n 1)" != "PONG" ] ||
+    fail "password_rotation: the old password still opens the write endpoint"
+  rotate_password "$first"
+  assert_keys_everywhere password_rotation_back rotation "$OUTAGE_KEYS"
+}
+
 # With the NetworkPolicy on, replication, Sentinel and HAProxy must keep working, an allowed
 # client must get through, and any other pod must be shut out.
 scenario_network_policy() {
