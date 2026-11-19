@@ -22,6 +22,48 @@ clean_volume() {
   rm -rf /var/lib/kvrocks/db /var/lib/kvrocks/sentinel /var/lib/kvrocks/conf
 }
 
+with_archived_log() {
+  mkdir -p /var/lib/kvrocks/db/archive
+  touch /var/lib/kvrocks/db/archive/000010.log
+}
+
+assert_log_history_kept() {
+  [ -f /var/lib/kvrocks/db/archive/000010.log ] || fail "the archived log should be kept"
+  if grep -q '^rocksdb.wal_' /var/lib/kvrocks/conf/kvrocks.conf; then
+    fail "archiving should stay on"
+  fi
+}
+
+# Replayed by an empty replica, the history would publish the hellos of the old Sentinels again.
+test_a_restored_volume_drops_its_log_history() {
+  clean_volume
+  with_data
+  with_archived_log
+  assert_eq "master" "$(start)" "role"
+  [ ! -e /var/lib/kvrocks/db/archive ] || fail "the archived log should be gone"
+  grep -qx 'rocksdb.wal_ttl_seconds 0' /var/lib/kvrocks/conf/kvrocks.conf ||
+    fail "the log replayed at startup must not be archived"
+  grep -qx 'rocksdb.wal_size_limit_mb 0' /var/lib/kvrocks/conf/kvrocks.conf ||
+    fail "the log replayed at startup must not be archived"
+}
+
+test_a_volume_with_a_sentinel_conf_keeps_its_log_history() {
+  clean_volume
+  with_data
+  with_archived_log
+  saved_view kv-0.h 5
+  assert_eq "master" "$(start)" "role"
+  assert_log_history_kept
+}
+
+test_a_standalone_kvrocks_keeps_its_log_history() {
+  clean_volume
+  with_data
+  with_archived_log
+  KVROCKS_ARCHITECTURE=standalone start >/dev/null
+  assert_log_history_kept
+}
+
 test_follows_the_master_the_peer_sentinels_name() {
   clean_volume
   with_data

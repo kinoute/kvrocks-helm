@@ -107,10 +107,30 @@ wait_until_empty_start_is_safe() { # prints the master to follow, possibly this 
   done
 }
 
+# Data with no sentinel.conf next to it: Kvrocks ran on this volume, no Sentinel of the chart
+# ever did. It was restored from a backup, or migrated from a standalone Kvrocks. Its write-ahead
+# log holds every message the old master published, the hellos of the old Sentinels among them,
+# and an empty replica resumes from the first sequence when the log still has it: replaying,
+# it publishes those hellos again. The new Sentinels, at epoch 0, take them for news and follow
+# failovers long gone, demoting this pod. Without that history, the replicas copy the data.
+#
+# The history is in two places: the archive, and the live log that RocksDB replays when it
+# opens the database, then archives. Archiving stays off until Kvrocks restarts, so that the
+# replayed log is deleted instead; meanwhile, a replica that falls behind the live log copies
+# the data again rather than resuming.
+drop_log_history_of_a_restored_volume() {
+  has_data || return 0
+  [ ! -f "$SENTINEL_CONF" ] || return 0
+  log "data but no sentinel.conf, a restored volume: dropping its log history, the replicas will copy the data"
+  rm -rf "$DATA_DIR/db/archive"
+  printf 'rocksdb.wal_ttl_seconds 0\nrocksdb.wal_size_limit_mb 0\n' >>"$KVROCKS_CONF"
+}
+
 validate_password
 render_config
 
 if [ "$KVROCKS_ARCHITECTURE" = "replication" ]; then
+  drop_log_history_of_a_restored_volume
   master=$(find_master)
   if [ "$master" = "$(self_fqdn)" ] && ! has_data; then
     master=$(wait_until_empty_start_is_safe)
