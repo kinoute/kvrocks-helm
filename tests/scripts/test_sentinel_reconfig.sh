@@ -24,6 +24,25 @@ test_the_former_master_is_demoted_at_once() {
   assert_called "localhost:6379 client kill type normal"
 }
 
+test_a_new_master_that_reports_itself_master_is_followed() {
+  former_master
+  kvrocks_master kv-1.h
+  reconfig
+  assert_eq 0 "$STATUS" "exit status"
+  assert_called "localhost:6379 slaveof kv-1.h 6379"
+}
+
+# A hello of an old Sentinel, replayed from a restored write-ahead log, named kv-1, which
+# follows kv-0: following it back would leave the cluster with no master.
+test_a_new_master_that_reports_itself_a_replica_is_not_followed() {
+  former_master
+  kvrocks_replica kv-1.h kv-0.h
+  reconfig
+  assert_eq 1 "$STATUS" "exit status: Sentinel must run it again"
+  assert_not_called "slaveof"
+  grep -q "kv-1.h reports itself a replica" "$WORLD/out" || fail "expected the reason in the log"
+}
+
 test_a_run_replayed_after_a_later_failover_leaves_the_new_master_alone() {
   former_master
   # Since the failover this run was started for, another one made kv-0 the master again.
