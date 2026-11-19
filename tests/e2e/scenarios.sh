@@ -633,7 +633,7 @@ scenario_empty_first_pod_after_outage() {
 # README says: only db/. That volume also holds the view of its Sentinel, which names the
 # master of the time; pod 0 restored with it would follow that pod, empty after the reinstall.
 scenario_restore_from_replica_snapshot() {
-  local replica backup="$REPO_ROOT/.e2e/restore-$RUN_ID.tar"
+  local replica ordinal switches backup="$REPO_ROOT/.e2e/restore-$RUN_ID.tar"
   write_keys restore "$OUTAGE_KEYS"
   # The case that matters: the saved view names a master other than pod 0.
   make_master 1
@@ -685,6 +685,18 @@ EOF
   [ "$(current_master)" = "0" ] ||
     fail "restore_from_replica_snapshot: pod 0, which holds the restored data, should be the master"
   assert_keys_everywhere restore_from_replica_snapshot restore "$OUTAGE_KEYS"
+  # Replaying the restored log instead, the empty replicas would publish the hellos of the old
+  # Sentinels again, and the new ones would follow the failovers those announce. Whether the
+  # Sentinels hear them depends on how long the replay lasts: the copy is what is checked.
+  for ordinal in $(ordinals); do
+    [ "$ordinal" != "0" ] || continue
+    [ "$(pod_full_syncs "$ordinal")" -ge 1 ] ||
+      fail "restore_from_replica_snapshot: pod $ordinal replayed the restored log instead of copying the data"
+  done
+  switches=$(for ordinal in $(ordinals); do k logs "$(pod_name "$ordinal")" -c sentinel 2>/dev/null; done |
+    grep -c '+switch-master' || true)
+  [ "$switches" = "0" ] ||
+    fail "restore_from_replica_snapshot: the Sentinels switched masters $switches times with no failover"
 }
 
 # The README's rotation: the Secret changes, which restarts nothing, then every pod of the

@@ -221,6 +221,8 @@ The chart does not take backups. Two ways that fit it:
 
 To restore, follow the migration above with the backup as the data, keeping only its `db/` directory. A snapshot of a pod of the chart also holds `sentinel/sentinel.conf`, the view of the cluster that pod had. A pod 0 that starts on it follows the master that view names: in the same release and namespace, that is another pod, empty, which waits for a failover that may never come.
 
+On data with no `sentinel/sentinel.conf` next to it, restored or migrated, pod 0 drops the history of the write-ahead log before Kvrocks opens it, and the other pods copy the data with a full sync. Replaying that history instead, they would publish every message of the old cluster again, the hellos of its Sentinels among them, and the new Sentinels would follow failovers long gone. Until pod 0 restarts, its log is not archived: a replica that falls behind its live log copies the data again.
+
 ### Upgrading the chart
 
 A new version of the chart restarts the pods only when it changes what they run: an image, the configuration of Kvrocks or of HAProxy, or the scripts. The rolling update then restarts every Kvrocks pod, with one handover of the master. A version that changes none of these, a new alert rule for instance, restarts nothing: test `tests/chart/pod-templates.sh` checks it on every change.
