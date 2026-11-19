@@ -413,6 +413,25 @@ test_to_a_lost_session_before_the_failover_gives_everything_back() {
   assert_called "kv-2.h:6379 config set slave-priority 100"
 }
 
+test_a_lost_session_while_writes_are_being_paused_gives_them_back() {
+  cluster_ready
+  # The signal lands while Kvrocks is still taking the pause: once it has answered, the
+  # pause holds although the script never saw the answer.
+  handler localhost:6379 "client pause" <<'HANDLER'
+sleep 1
+echo OK
+HANDLER
+  /scripts/kvrocks-switchover.sh >"$WORLD/out" 2>&1 &
+  pid=$!
+  wait_until 'calls | grep -q "localhost:6379 client pause"'
+  kill -HUP "$pid"
+  STATUS=0
+  wait "$pid" || STATUS=$?
+  assert_eq 1 "$STATUS" "exit status"
+  assert_not_called "sentinel failover"
+  assert_called "localhost:6379 client unpause"
+}
+
 test_to_warns_when_the_priority_cannot_be_given_back() {
   steered_cluster_ready
   # kv-2 takes the lowest priority, then refuses its old one.

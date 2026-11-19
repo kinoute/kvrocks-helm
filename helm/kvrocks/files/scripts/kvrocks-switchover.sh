@@ -340,12 +340,14 @@ deadline=$((pause_ends - REQUEST_MARGIN_MS))
 # A write accepted once the pause runs out could miss the replica Sentinel promotes: the
 # pause must outlast the request and the renewal that follows it.
 latest_request=$((pause_ends - FAILOVER_REQUEST_TIMEOUT_SECONDS * 1000 - RENEWAL_MARGIN_MS))
+# Until Sentinel accepts the failover, giving up is safe: writes simply resume here. Held
+# before the pause is asked for: a signal that lands while Kvrocks takes it must release it
+# all the same, and releasing a pause that never took changes nothing.
+writes_held=yes
 if ! pause_writes; then
   log "ERROR: this Kvrocks cannot pause writes (CLIENT PAUSE WRITE needs Kvrocks 2.16.0 or later), no handover"
   exit 1
 fi
-# Until Sentinel accepts the failover, giving up is safe: writes simply resume here.
-writes_held=yes
 target_offset=$(kv_info_field localhost master_repl_offset)
 if [ -z "$target_offset" ]; then
   give_up "cannot read the replication offset of this Kvrocks"
