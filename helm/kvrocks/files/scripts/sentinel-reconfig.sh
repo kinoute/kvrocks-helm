@@ -16,6 +16,7 @@ SCRIPT_NAME=sentinel-reconfig
 DEMOTE_TIMEOUT_SECONDS=${DEMOTE_TIMEOUT_SECONDS:-45}
 RETRY_SECONDS=1
 SENTINEL_TIMEOUT_SECONDS=1
+NEW_MASTER_TIMEOUT_SECONDS=1
 
 from_host=$4
 to_host=$6
@@ -37,6 +38,20 @@ out_of_date() {
   [ -n "$master" ] && [ "$master" != "$to_host" ]
 }
 
+# Sentinel names a master only once it reports itself one. A new master that reports itself a
+# replica comes from a stale message, such as a hello of an old Sentinel replayed from a restored
+# write-ahead log: following it, this pod would follow its own replica, and the cluster would be
+# left with no master. A new master that does not answer is followed all the same: stopping the
+# writes here is what keeps them from being lost.
+new_master_is_a_replica() {
+  local role
+  role=$(
+    CLI_TIMEOUT_SECONDS=$NEW_MASTER_TIMEOUT_SECONDS
+    kv_role "$to_host"
+  )
+  [ "$role" = "slave" ]
+}
+
 deadline=$(($(date +%s) + DEMOTE_TIMEOUT_SECONDS))
 attempt=1
 while true; do
@@ -50,11 +65,15 @@ while true; do
         log "Sentinel no longer names $to_host as master: the local Kvrocks is left as it is"
         exit 0
       fi
-      [ "$attempt" -gt 1 ] || log "demoting the local Kvrocks, new master is $to_host"
-      kv_cli localhost slaveof "$to_host" "$to_port" >/dev/null || true
-      # Connected clients must reconnect and reach the new master.
-      kv_cli localhost client kill type normal >/dev/null || true
-      kv_cli localhost config rewrite >/dev/null || true
+      if new_master_is_a_replica; then
+        [ "$attempt" -gt 1 ] || log "$to_host reports itself a replica: the local Kvrocks stays master for now"
+      else
+        [ "$attempt" -gt 1 ] || log "demoting the local Kvrocks, new master is $to_host"
+        kv_cli localhost slaveof "$to_host" "$to_port" >/dev/null || true
+        # Connected clients must reconnect and reach the new master.
+        kv_cli localhost client kill type normal >/dev/null || true
+        kv_cli localhost config rewrite >/dev/null || true
+      fi
       ;;
   esac
   if [ "$(date +%s)" -ge "$deadline" ]; then
