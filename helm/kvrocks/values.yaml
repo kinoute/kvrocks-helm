@@ -7,7 +7,9 @@ clusterDomain: cluster.local
 # -- Labels added to every resource.
 commonLabels: {} # @schema additionalProperties:true
 
-global:
+# Open to any key: as a dependency of another chart, this chart receives every global
+# value of its parent.
+global: # @schema additionalProperties:true
   # -- Registry that replaces the registry of every image (e.g. a pull-through cache).
   imageRegistry: ""
   # -- Pull secrets added to every pod.

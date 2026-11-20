@@ -113,7 +113,7 @@ For a release named `db`:
 
 ### Main values
 
-Every value is listed with its default in the [chart's README](helm/kvrocks/README.md), generated from the comments of [`values.yaml`](helm/kvrocks/values.yaml), and `values.schema.json` rejects unknown keys. The ones you are most likely to set:
+Every value is listed with its default in the [chart's README](helm/kvrocks/README.md), generated from the comments of [`values.yaml`](helm/kvrocks/values.yaml), and `values.schema.json` rejects unknown keys outside `global`, which a parent chart fills. The ones you are most likely to set:
 
 | Value | Default | What it does |
 | --- | --- | --- |
