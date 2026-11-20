@@ -455,6 +455,11 @@
       },
       "type": "object"
     },
+    "nodeAffinity": {
+      "additionalProperties": true,
+      "properties": {},
+      "type": "object"
+    },
     "nodeSelector": {
       "additionalProperties": true,
       "properties": {},

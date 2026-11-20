@@ -52,7 +52,7 @@ For a release named `db`, with the default ports:
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| affinity | object | `{}` | Replaces the default affinity entirely. |
+| affinity | object | `{}` | Replaces the default affinity entirely: the anti-affinity of `podAntiAffinity` is gone, and nothing keeps two Kvrocks pods off one node unless it says so. `nodeAffinity` cannot be set with it. |
 | architecture | string | `"replication"` | `replication`: one master and its replicas, with Sentinel failover and an HAProxy write endpoint. `standalone`: a single Kvrocks, no Sentinel, no HAProxy. |
 | auth.existingSecret | string | `""` | Name of an existing Secret holding the password. Takes precedence over `password`. |
 | auth.password | string | `""` | Password stored in a Secret created by the chart. Prefer `existingSecret`. It must not contain whitespace, double quotes or backslashes. |
@@ -120,6 +120,7 @@ For a release named `db`, with the default ports:
 | networkPolicy.clientsFrom | list | `[]` | Peers allowed to reach the write endpoint and the read Service, as NetworkPolicy `from` entries. Empty allows every pod of the cluster. |
 | networkPolicy.enabled | bool | `false` | Restricts ingress to the Kvrocks and HAProxy pods. With TLS, a NetworkPolicy is installed anyway, to keep the port in clear inside the release. |
 | networkPolicy.metricsFrom | list | `[]` | Peers allowed to scrape the metrics, as NetworkPolicy `from` entries. Empty allows every pod of the cluster. |
+| nodeAffinity | object | `{}` | Node affinity of the Kvrocks pods, as a Kubernetes `nodeAffinity`, to keep them on a node pool for instance. Added to the anti-affinity of `podAntiAffinity`, which `affinity` would replace. |
 | nodeSelector | object | `{}` | Node selector of the Kvrocks pods. |
 | persistence.accessModes | list | `["ReadWriteOnce"]` | Access modes of the volumes. |
 | persistence.annotations | object | `{}` | Annotations of the volume claims. |

@@ -526,6 +526,51 @@ tests:
                         app.kubernetes.io/instance: db
                         app.kubernetes.io/component: kvrocks
 
+  - it: adds nodeAffinity to the default anti-affinity
+    template: statefulset.yaml
+    set:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: example.com/database
+                  operator: Exists
+    asserts:
+      - equal:
+          path: spec.template.spec.affinity
+          value:
+            nodeAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                nodeSelectorTerms:
+                  - matchExpressions:
+                      - key: example.com/database
+                        operator: Exists
+            podAntiAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - topologyKey: kubernetes.io/hostname
+                  labelSelector:
+                    matchLabels:
+                      app.kubernetes.io/name: kvrocks
+                      app.kubernetes.io/instance: db
+                      app.kubernetes.io/component: kvrocks
+
+  - it: adds nodeAffinity to a soft anti-affinity too
+    template: statefulset.yaml
+    set:
+      podAntiAffinity: soft
+      nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 50
+            preference:
+              matchExpressions:
+                - key: example.com/ssd
+                  operator: Exists
+    asserts:
+      - exists:
+          path: spec.template.spec.affinity.nodeAffinity.preferredDuringSchedulingIgnoredDuringExecution
+      - exists:
+          path: spec.template.spec.affinity.podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution
+
   - it: replaces the default anti-affinity with affinity
     template: statefulset.yaml
     set:

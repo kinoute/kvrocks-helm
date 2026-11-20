@@ -144,7 +144,13 @@ priorityClassName: ""
 # the Sentinel majority, and any failover, together with that node. `soft` only prefers it,
 # for clusters with fewer nodes than pods. Ignored when `affinity` is set.
 podAntiAffinity: hard # @schema enum:[hard,soft]
-# -- Replaces the default affinity entirely.
+# -- Node affinity of the Kvrocks pods, as a Kubernetes `nodeAffinity`, to keep them on a node
+# pool for instance. Added to the anti-affinity of `podAntiAffinity`, which `affinity` would
+# replace.
+nodeAffinity: {} # @schema additionalProperties:true
+# -- Replaces the default affinity entirely: the anti-affinity of `podAntiAffinity` is gone,
+# and nothing keeps two Kvrocks pods off one node unless it says so. `nodeAffinity` cannot be
+# set with it.
 affinity: {} # @schema additionalProperties:true
 
 # -- Extra environment variables of the kvrocks container, as Kubernetes `env` entries. The

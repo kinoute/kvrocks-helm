@@ -14,6 +14,7 @@ TLS := --set tls.enabled=true --set tls.existingSecret=kv-tls --set tls.ca.secre
 	--set tls.clientSecret=kv-client-tls --set tls.reloader=true
 # Every value that extends the pods and the Services, so that their schemas are checked too.
 EXTENSIONS := --set commonAnnotations.team=data --set persistence.retentionPolicy.whenDeleted=Delete \
+	--set-json 'nodeAffinity={"requiredDuringSchedulingIgnoredDuringExecution":{"nodeSelectorTerms":[{"matchExpressions":[{"key":"pool","operator":"In","values":["databases"]}]}]}}' \
 	--set service.type=LoadBalancer --set 'service.loadBalancerSourceRanges={10.0.0.0/8}' \
 	--set readService.type=NodePort --set readService.nodePort=30380 \
 	--set-json 'extraEnv=[{"name":"TZ","value":"UTC"}]' \
