@@ -116,19 +116,28 @@ jobs:
     permissions:
       contents: read
       packages: write
+      # Keyless signing: the signature proves this workflow pushed the chart.
+      id-token: write
     steps:
       - uses: actions/checkout@v7
       - uses: azure/setup-helm@v5
         with:
           version: ${{ env.HELM_VERSION }}
+      - uses: sigstore/cosign-installer@v4.1.3
       - name: Check that the tag matches the chart version
         run: |
           chart_version=$(awk '$1 == "version:" { print $2 }' helm/kvrocks/Chart.yaml)
           [ "v${chart_version}" = "$GITHUB_REF_NAME" ] ||
             { echo "tag $GITHUB_REF_NAME does not match chart version $chart_version"; exit 1; }
-      - name: Push the chart to GHCR
+      - name: Push the chart to GHCR and sign it
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" |
             helm registry login ghcr.io --username "${{ github.actor }}" --password-stdin
+          echo "${{ secrets.GITHUB_TOKEN }}" |
+            cosign login ghcr.io --username "${{ github.actor }}" --password-stdin
           helm package helm/kvrocks
-          helm push kvrocks-*.tgz "oci://ghcr.io/${{ github.repository_owner }}/charts"
+          helm push kvrocks-*.tgz "oci://ghcr.io/${{ github.repository_owner }}/charts" | tee push.log
+          # Signed by digest: a tag can be moved, a digest cannot.
+          digest=$(awk '$1 == "Digest:" { print $2 }' push.log)
+          [ -n "$digest" ] || { echo "helm push printed no digest"; exit 1; }
+          cosign sign --yes "ghcr.io/${{ github.repository_owner }}/charts/kvrocks@${digest}"

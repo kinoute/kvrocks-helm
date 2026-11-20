@@ -16,7 +16,7 @@ helm install db oci://ghcr.io/kinoute/charts/kvrocks --version {{ template "char
 helm test db
 ```
 
-Until a version is tagged, nothing is published to the registry: replace `oci://ghcr.io/kinoute/charts/kvrocks` with `./helm/kvrocks` from a clone of the repository.
+From a clone of the repository, `./helm/kvrocks` replaces `oci://ghcr.io/kinoute/charts/kvrocks`. The chart is signed with cosign: the [repository's README]({{ template "chart.homepage" . }}#installation) shows how to check it.
 
 Pick the password before you install: changing it afterwards takes a short write outage, see [Rotating the password]({{ template "chart.homepage" . }}#rotating-the-password).
 
