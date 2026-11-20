@@ -282,7 +282,7 @@ There is no rolling rotation: during a rolling restart, pods with the new passwo
 2. Delete every Kvrocks and HAProxy pod of the release at once: `kubectl delete pod -l app.kubernetes.io/instance=<release>`.
 3. The pods come back with the new password and pick the master from the state they saved, as after a power cut (scenario `full_outage`). Update the clients.
 
-This procedure itself has not been run end to end.
+Scenario `password_rotation` runs this procedure, checks that every key written before is still on every pod, and that the old password is refused.
 
 ## What a failure costs
 
