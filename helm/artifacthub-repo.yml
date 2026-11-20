@@ -1,0 +1,3 @@
+# What ArtifactHub reads from the chart's OCI repository, under the tag `artifacthub.io`: the CI
+# pushes it there when it changes. The ID of the repository makes its publisher a verified one.
+repositoryID: 045f9510-0a1c-44af-bb05-4691832c490f

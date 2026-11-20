@@ -4,7 +4,8 @@ SHELL := bash -o pipefail
 
 CHART := helm/kvrocks
 SCRIPTS := $(CHART)/files/scripts/*.sh tests/e2e/*.sh tests/prometheus/run.sh \
-	tests/scripts/run.sh tests/scripts/harness.sh tests/scripts/fake/* tests/chart/*.sh
+	tests/scripts/run.sh tests/scripts/harness.sh tests/scripts/fake/* tests/chart/*.sh \
+	.github/scripts/*.sh
 LOADGEN := tests/e2e/loadgen
 
 # Every optional resource switched on, so that the schemas of all of them are checked.

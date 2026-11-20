@@ -109,6 +109,26 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/kvrocks-e2e-loadgen:${{ github.ref_name == 'main' && 'latest' || github.ref_name }}
           labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
 
+  # ArtifactHub reads the ID of the repository, which makes the publisher a verified one, from
+  # the tag artifacthub.io of the chart's OCI repository. The script only pushes a changed file.
+  artifacthub-metadata:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    needs: checks
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oras-project/setup-oras@v2.0.4
+        with:
+          version: 1.4.0
+      - name: Push artifacthub-repo.yml
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" |
+            oras login ghcr.io --username "${{ github.actor }}" --password-stdin
+          .github/scripts/push-artifacthub-metadata.sh "ghcr.io/${{ github.repository_owner }}/charts/kvrocks"
+
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
