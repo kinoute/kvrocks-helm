@@ -135,6 +135,8 @@ For a release named `db`, with the default ports:
 | priorityClassName | string | `""` | PriorityClass of the Kvrocks pods. |
 | readService.annotations | object | `{}` | Annotations of the read Service. |
 | readService.enabled | bool | `true` | Creates a second Service that spreads reads over every ready pod, replicas included. Replication is asynchronous: a read may return slightly stale data. |
+| readService.loadBalancerSourceRanges | list | `[]` | Client addresses allowed through, as CIDRs, with `type: LoadBalancer`. Empty lets any address through. |
+| readService.nodePort | string | `""` | Node port of the read Service, with `type: NodePort`. Empty lets Kubernetes pick. |
 | readService.port | int | `6379` | Port of the read Service. |
 | readService.type | string | `"ClusterIP"` | Type of the read Service. |
 | readinessProbe | object | `{"failureThreshold":3,"periodSeconds":5,"timeoutSeconds":5}` | A replica is ready once it follows the master, has finished syncing and holds every write the master held a moment before. The Sentinel sidecar takes the same timings. |
@@ -148,6 +150,7 @@ For a release named `db`, with the default ports:
 | sentinel.port | int | `26379` | Port of Sentinel. |
 | sentinel.resources | object | `{}` | Resources of the Sentinel sidecar. |
 | service.annotations | object | `{}` | Annotations of the write Service. |
+| service.loadBalancerSourceRanges | list | `[]` | Client addresses allowed through, as CIDRs, with `type: LoadBalancer`. Empty lets any address through. |
 | service.nodePort | string | `""` | Node port of the write endpoint, with `type: NodePort`. Empty lets Kubernetes pick. |
 | service.port | int | `6379` | Port of the write Service. |
 | service.type | string | `"ClusterIP"` | Type of the write Service. |

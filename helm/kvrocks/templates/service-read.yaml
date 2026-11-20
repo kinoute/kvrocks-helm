@@ -11,10 +11,17 @@ metadata:
   {{- end }}
 spec:
   type: {{ .Values.readService.type }}
+  {{- with .Values.readService.loadBalancerSourceRanges }}
+  loadBalancerSourceRanges:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   ports:
     - name: kvrocks
       port: {{ .Values.readService.port }}
       targetPort: kvrocks
+      {{- if and (eq .Values.readService.type "NodePort") .Values.readService.nodePort }}
+      nodePort: {{ .Values.readService.nodePort }}
+      {{- end }}
   # Every ready pod: the master, and the replicas that have caught up with it.
   selector:
     {{- include "kvrocks.selectorLabels" (dict "root" . "component" "kvrocks") | nindent 4 }}

@@ -86,3 +86,17 @@ tests:
           path: metadata.annotations
           value:
             example.com/owner: data-team
+
+  - it: lets only loadBalancerSourceRanges through a LoadBalancer
+    set:
+      service.type: LoadBalancer
+      service.loadBalancerSourceRanges: [10.0.0.0/8, 192.168.1.0/24]
+    asserts:
+      - equal:
+          path: spec.loadBalancerSourceRanges
+          value: [10.0.0.0/8, 192.168.1.0/24]
+
+  - it: sets no source ranges by default
+    asserts:
+      - notExists:
+          path: spec.loadBalancerSourceRanges

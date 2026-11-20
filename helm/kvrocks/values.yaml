@@ -214,6 +214,9 @@ service:
   port: 6379 # @schema minimum:1;maximum:65535
   # -- Node port of the write endpoint, with `type: NodePort`. Empty lets Kubernetes pick.
   nodePort: "" # @schema type:[string,integer]
+  # -- Client addresses allowed through, as CIDRs, with `type: LoadBalancer`. Empty lets any
+  # address through.
+  loadBalancerSourceRanges: []
   # -- Annotations of the write Service.
   annotations: {} # @schema additionalProperties:true
 
@@ -225,6 +228,11 @@ readService:
   type: ClusterIP # @schema enum:[ClusterIP,NodePort,LoadBalancer]
   # -- Port of the read Service.
   port: 6379 # @schema minimum:1;maximum:65535
+  # -- Node port of the read Service, with `type: NodePort`. Empty lets Kubernetes pick.
+  nodePort: "" # @schema type:[string,integer]
+  # -- Client addresses allowed through, as CIDRs, with `type: LoadBalancer`. Empty lets any
+  # address through.
+  loadBalancerSourceRanges: []
   # -- Annotations of the read Service.
   annotations: {} # @schema additionalProperties:true
 

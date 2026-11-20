@@ -481,3 +481,20 @@ tests:
     asserts:
       - failedTemplate:
           errorMessage: config.tls-port is managed by the chart and cannot be overridden
+
+  # --- Source ranges ---
+
+  - it: refuses source ranges on a write Service that is no LoadBalancer, which would ignore them
+    set:
+      service.loadBalancerSourceRanges: [10.0.0.0/8]
+    asserts:
+      - failedTemplate:
+          errorMessage: "service.loadBalancerSourceRanges needs service.type LoadBalancer: no other type filters the clients"
+
+  - it: refuses source ranges on a read Service that is no LoadBalancer
+    set:
+      readService.type: NodePort
+      readService.loadBalancerSourceRanges: [10.0.0.0/8]
+    asserts:
+      - failedTemplate:
+          errorMessage: "readService.loadBalancerSourceRanges needs readService.type LoadBalancer: no other type filters the clients"

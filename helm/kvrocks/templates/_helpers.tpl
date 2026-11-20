@@ -209,6 +209,13 @@ bind port dir pidfile log-dir daemonize cluster-enabled requirepass masterauth s
 {{- if and (include "kvrocks.isReplication" .) (eq (int .Values.port) (int .Values.haproxy.healthPort)) }}
 {{- fail "haproxy.healthPort must differ from port: HAProxy listens on both" }}
 {{- end }}
+{{- /* Any other type would let every address through, whatever the ranges say. */}}
+{{- if and .Values.service.loadBalancerSourceRanges (ne .Values.service.type "LoadBalancer") }}
+{{- fail "service.loadBalancerSourceRanges needs service.type LoadBalancer: no other type filters the clients" }}
+{{- end }}
+{{- if and .Values.readService.loadBalancerSourceRanges (ne .Values.readService.type "LoadBalancer") }}
+{{- fail "readService.loadBalancerSourceRanges needs readService.type LoadBalancer: no other type filters the clients" }}
+{{- end }}
 {{- /*
 Kvrocks reads a key in any case, and a value with a line break adds a line of its own: either
 would slip a reserved setting past the check below. The namespace tokens are credentials, and
