@@ -20,3 +20,22 @@ tests:
     asserts:
       - notMatchRegexRaw:
           pattern: Sentinel \(master name
+
+  - it: warns that Kvrocks pods without resources are the first evicted
+    asserts:
+      - matchRegexRaw:
+          pattern: "WARNING: the Kvrocks pods have no resources"
+
+  - it: warns a standalone Kvrocks without resources too
+    set:
+      architecture: standalone
+    asserts:
+      - matchRegexRaw:
+          pattern: "WARNING: the Kvrocks pods have no resources"
+
+  - it: does not warn once the Kvrocks pods have resources
+    set:
+      resources.requests.memory: 1Gi
+    asserts:
+      - notMatchRegexRaw:
+          pattern: WARNING

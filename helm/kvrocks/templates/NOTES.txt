@@ -23,3 +23,10 @@ but had not sent to a replica yet are lost.
 {{- else }}
 Kvrocks runs as a single instance:  {{ $name }}.{{ $domain }}:{{ .Values.service.port }}
 {{- end }}
+{{- if not .Values.resources }}
+
+WARNING: the Kvrocks pods have no resources: they run as BestEffort, the first pods
+evicted under memory pressure. Set `resources`, and with a memory limit lower
+`rocksdb.block_cache_size` in `config`, or the master is killed for running out of
+memory, with no handover. See Sizing in the README of the repository.
+{{- end }}
