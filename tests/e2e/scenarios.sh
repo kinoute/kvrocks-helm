@@ -641,8 +641,12 @@ scenario_restore_from_replica_snapshot() {
   assert_keys_everywhere restore_before restore "$OUTAGE_KEYS"
   # The whole volume, as a snapshot holds it. GNU tar exits 1 on a file that changed while it
   # read it, as the log of a running Sentinel may: the files that matter here are idle.
-  k exec "$(pod_name "$replica")" -c kvrocks -- sh -c 'tar -C /var/lib/kvrocks -cf - .; [ $? -le 1 ]' \
-    >"$backup" || fail "restore_from_replica_snapshot: could not copy the volume of pod $replica"
+  # Each file is stored whole: after a full sync it served, Kvrocks keeps checkpoint/ for 30 s
+  # or more, hard links to the files of db/, and tar would store those of db/ as links to
+  # checkpoint/, which the restore of db/ alone cannot resolve.
+  k exec "$(pod_name "$replica")" -c kvrocks -- \
+    sh -c 'tar -C /var/lib/kvrocks --hard-dereference -cf - .; [ $? -le 1 ]' >"$backup" ||
+    fail "restore_from_replica_snapshot: could not copy the volume of pod $replica"
   remove_release
   k apply -f - >/dev/null <<EOF
 apiVersion: v1
