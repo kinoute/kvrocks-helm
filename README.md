@@ -121,6 +121,7 @@ Every value is listed with its default in the [chart's README](helm/kvrocks/READ
 | `auth.existingSecret` | | Secret that holds the password, under the key `auth.secretKey` |
 | `persistence.size` | `10Gi` | Size of each pod's volume, see [Sizing](#sizing). A StatefulSet cannot change it afterwards |
 | `podAntiAffinity` | `hard` | `soft` lets two Kvrocks pods share a node, for clusters with fewer nodes than pods |
+| `nodeSelector`, `nodeAffinity` | | Keep the Kvrocks pods on some nodes, on top of the anti-affinity. `affinity` replaces the anti-affinity instead |
 | `config` | `use-rsid-psync: "yes"` | Extra `kvrocks.conf` settings |
 | `sentinel.downAfterMilliseconds` | `10000` | How long a master must be unreachable before Sentinel fails over |
 | `fencing.enabled` | `true` | Pauses the writes of a master that neither a majority of Sentinels nor its replicas follow any more |

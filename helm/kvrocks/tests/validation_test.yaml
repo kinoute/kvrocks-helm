@@ -482,6 +482,22 @@ tests:
       - failedTemplate:
           errorMessage: config.tls-port is managed by the chart and cannot be overridden
 
+  # --- Affinity ---
+
+  - it: refuses nodeAffinity with affinity, which would drop it
+    set:
+      affinity:
+        podAffinity: {}
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: example.com/database
+                  operator: Exists
+    asserts:
+      - failedTemplate:
+          errorMessage: "nodeAffinity cannot be set with affinity, which replaces the whole affinity: put the node affinity in affinity"
+
   # --- Source ranges ---
 
   - it: refuses source ranges on a write Service that is no LoadBalancer, which would ignore them

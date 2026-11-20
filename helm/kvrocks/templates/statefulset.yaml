@@ -68,6 +68,10 @@ spec:
         {{- if .Values.affinity }}
         {{- toYaml .Values.affinity | nindent 8 }}
         {{- else }}
+        {{- with .Values.nodeAffinity }}
+        nodeAffinity:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
         # Two Kvrocks pods on one node: losing that node loses the Sentinel majority, and
         # with it any failover. Hence one pod per node unless podAntiAffinity says soft.
         podAntiAffinity:

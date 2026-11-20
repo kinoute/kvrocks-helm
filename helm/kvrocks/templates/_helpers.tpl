@@ -209,6 +209,9 @@ bind port dir pidfile log-dir daemonize cluster-enabled requirepass masterauth s
 {{- if and (include "kvrocks.isReplication" .) (eq (int .Values.port) (int .Values.haproxy.healthPort)) }}
 {{- fail "haproxy.healthPort must differ from port: HAProxy listens on both" }}
 {{- end }}
+{{- if and .Values.affinity .Values.nodeAffinity }}
+{{- fail "nodeAffinity cannot be set with affinity, which replaces the whole affinity: put the node affinity in affinity" }}
+{{- end }}
 {{- /* Any other type would let every address through, whatever the ranges say. */}}
 {{- if and .Values.service.loadBalancerSourceRanges (ne .Values.service.type "LoadBalancer") }}
 {{- fail "service.loadBalancerSourceRanges needs service.type LoadBalancer: no other type filters the clients" }}
