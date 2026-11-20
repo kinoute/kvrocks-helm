@@ -129,6 +129,12 @@ Every value is listed with its default in the [chart's README](helm/kvrocks/READ
 | `networkPolicy.enabled` | `false` | Restricts who can reach the pods |
 | `tls.enabled` | `false` | Clients connect over TLS, with a client certificate by default, see [TLS](#tls) |
 
+### Extending the Kvrocks pods
+
+`extraEnv`, `extraVolumes`, `extraVolumeMounts` and `sidecars` add to the Kvrocks pods, a backup agent for instance, which can mount the `data` volume read-only. The chart refuses what would replace its own: an environment variable it sets, a volume or a container with one of its names, a mount under one of its paths. Nothing is added to the HAProxy pods, whose configuration the chart writes whole.
+
+A sidecar that is not ready makes its pod not ready: the read Service stops sending it reads, and the PodDisruptionBudget counts it as down, which holds the drain of any other node. The tests check where these values land in the manifests, not what a sidecar does to a failover: no scenario runs with one.
+
 ### TLS
 
 TLS covers the clients only. Kvrocks takes them on `port` (6379) over TLS, and with `tls.authClients` (the default) only with a certificate signed by the CA. Everything between the pods of the release stays in clear on `tls.internalPort` (6666): replication, Sentinel, the checks of HAProxy, the fencing and the exporter.

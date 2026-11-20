@@ -1,0 +1,110 @@
+suite: StatefulSet - extra environment, volumes and sidecars
+templates:
+  - statefulset.yaml
+  # Not asserted on: the StatefulSet includes both to compute its checksum annotations,
+  # and helm-unittest only renders the templates listed here.
+  - configmap.yaml
+  - scripts-configmap.yaml
+release:
+  name: db
+  namespace: data
+set:
+  auth.password: test-password
+tests:
+  - it: adds nothing by default
+    template: statefulset.yaml
+    asserts:
+      - lengthEqual:
+          path: spec.template.spec.containers
+          count: 2
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TZ
+          any: true
+
+  - it: appends extraEnv to the environment of the kvrocks container only
+    template: statefulset.yaml
+    set:
+      extraEnv:
+        - name: TZ
+          value: Europe/Paris
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].env
+          content:
+            name: TZ
+            value: Europe/Paris
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].env
+          content:
+            name: POD_NAME
+          any: true
+      - notContains:
+          path: spec.template.spec.initContainers[?(@.name == "sentinel")].env
+          content:
+            name: TZ
+            value: Europe/Paris
+
+  - it: adds extraVolumes next to the chart's volumes
+    template: statefulset.yaml
+    set:
+      extraVolumes:
+        - name: backup
+          emptyDir: {}
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: backup
+            emptyDir: {}
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: scripts
+          any: true
+
+  - it: mounts extraVolumeMounts in the kvrocks container
+    template: statefulset.yaml
+    set:
+      extraVolumes:
+        - name: backup
+          emptyDir: {}
+      extraVolumeMounts:
+        - name: backup
+          mountPath: /backup
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].volumeMounts
+          content:
+            name: backup
+            mountPath: /backup
+      - contains:
+          path: spec.template.spec.containers[?(@.name == "kvrocks")].volumeMounts
+          content:
+            name: data
+            mountPath: /var/lib/kvrocks
+
+  - it: runs sidecars after the chart's containers, with access to the data volume
+    template: statefulset.yaml
+    set:
+      sidecars:
+        - name: backup-agent
+          image: registry.example.com/backup-agent:1.0
+          volumeMounts:
+            - name: data
+              mountPath: /data
+              readOnly: true
+    asserts:
+      - lengthEqual:
+          path: spec.template.spec.containers
+          count: 3
+      - equal:
+          path: spec.template.spec.containers[0].name
+          value: kvrocks
+      - equal:
+          path: spec.template.spec.containers[2].name
+          value: backup-agent
+      - equal:
+          path: spec.template.spec.containers[2].volumeMounts[0].name
+          value: data

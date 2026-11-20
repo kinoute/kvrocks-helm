@@ -62,6 +62,9 @@ For a release named `db`, with the default ports:
 | commonLabels | object | `{}` | Labels added to every resource. |
 | config | object | `{"use-rsid-psync":"yes"}` | Extra `kvrocks.conf` settings, as `key: value`. Settings the chart owns (bind, port, dir, the password, the replication role and priority...) are rejected, and so are `rename-command`, which would hide from the chart's scripts the commands they rely on, and the namespace tokens, which are credentials. |
 | containerSecurityContext | object | `{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true}` | Security context of every container of the Kvrocks pods. |
+| extraEnv | list | `[]` | Extra environment variables of the kvrocks container, as Kubernetes `env` entries. The names the chart sets are rejected. |
+| extraVolumeMounts | list | `[]` | Extra volume mounts of the kvrocks container. Paths under the chart's own mounts (`/var/lib/kvrocks`, `/etc/kvrocks`, `/scripts`, `/tmp`, `/tls`) are rejected. |
+| extraVolumes | list | `[]` | Extra volumes of the Kvrocks pods, for `extraVolumeMounts` and `sidecars`. The names of the chart's volumes (`data`, `config`, `scripts`, `tmp`, `tls-server`, `tls-ca`) are rejected. |
 | fencing.enabled | bool | `true` | Pauses the writes of a master that neither a majority of Sentinels nor its replicas follow any more, as when it is cut off from its peers. Kvrocks has no min-replicas-to-write: without fencing, connections already open to such a master keep writing to it until the partition heals, and all those writes are lost. The cost: a healthy master also stops taking writes when it is left without a majority of the pods, two down out of three for instance, as HAProxy already does. |
 | fencing.resources | object | `{}` | Resources of the fencing sidecar. |
 | fullnameOverride | string | `""` | Overrides the full resource name prefix. The write Service takes exactly this name. |
@@ -157,6 +160,7 @@ For a release named `db`, with the default ports:
 | serviceAccount.annotations | object | `{}` | Annotations of the ServiceAccount. |
 | serviceAccount.create | bool | `true` | Creates a ServiceAccount for the pods. None of them talks to the Kubernetes API. |
 | serviceAccount.name | string | the release's full name with `create`, else `default` | Name of the ServiceAccount. |
+| sidecars | list | `[]` | Extra containers of the Kvrocks pods, a backup agent for instance, which can mount the `data` volume. A sidecar that is not ready makes its pod not ready, which the read Service and the PodDisruptionBudget count. |
 | startupProbe | object | `{"failureThreshold":240,"periodSeconds":5,"timeoutSeconds":5}` | Kvrocks only listens once its database is open, which takes time on a large volume: the startup probe allows `failureThreshold * periodSeconds` (20 minutes by default). |
 | switchover.pauseMilliseconds | int | `5000` | Milliseconds client writes are paused while the master hands its role over (rolling update, drain). Must be lower than `sentinel.downAfterMilliseconds`, or Sentinel declares the paused master down. |
 | terminationGracePeriodSeconds | int | `120` | Seconds a pod gets to stop: the master handover, then Kvrocks flushing its WAL. At least `switchover.pauseMilliseconds` plus `sentinel.failoverTimeoutMilliseconds`, plus 30 s. |

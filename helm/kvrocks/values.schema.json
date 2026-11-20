@@ -78,6 +78,15 @@
       },
       "type": "object"
     },
+    "extraEnv": {
+      "type": "array"
+    },
+    "extraVolumeMounts": {
+      "type": "array"
+    },
+    "extraVolumes": {
+      "type": "array"
+    },
     "fencing": {
       "additionalProperties": false,
       "properties": {
@@ -729,6 +738,9 @@
         }
       },
       "type": "object"
+    },
+    "sidecars": {
+      "type": "array"
     },
     "startupProbe": {
       "additionalProperties": true,
