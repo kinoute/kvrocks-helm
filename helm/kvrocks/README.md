@@ -122,6 +122,7 @@ For a release named `db`, with the default ports:
 | persistence.annotations | object | `{}` | Annotations of the volume claims. |
 | persistence.enabled | bool | `true` | Keeps the data on a PersistentVolumeClaim per pod. `replication` requires it. In `standalone` mode, without it, the data lives in an `emptyDir` and is lost with the pod. |
 | persistence.labels | object | `{}` | Labels of the volume claims. |
+| persistence.retentionPolicy.whenDeleted | string | `"Retain"` | What becomes of the volume claims when the StatefulSet is deleted, by `helm uninstall` for instance: `Retain` keeps them with the data, `Delete` deletes them. |
 | persistence.size | string | `"10Gi"` | Size of each volume. A StatefulSet cannot change it afterwards: see "Sizing" in the repository's README. |
 | persistence.storageClass | string | the cluster's default StorageClass | StorageClass of the volumes. |
 | podAnnotations | object | `{}` | Annotations of the Kvrocks pods. |

@@ -109,6 +109,10 @@ persistence:
   annotations: {} # @schema additionalProperties:true
   # -- Labels of the volume claims.
   labels: {} # @schema additionalProperties:true
+  retentionPolicy:
+    # -- What becomes of the volume claims when the StatefulSet is deleted, by
+    # `helm uninstall` for instance: `Retain` keeps them with the data, `Delete` deletes them.
+    whenDeleted: Retain # @schema enum:[Retain,Delete]
 
 # -- Resources of the Kvrocks container. Without any, the pods run as BestEffort and are the
 # first evicted under memory pressure. Kvrocks caches up to 4 GB of blocks by default, on

@@ -233,7 +233,7 @@ Some values cannot change once the release is installed. Kubernetes refuses any 
 To grow the volumes all the same, when the StorageClass has `allowVolumeExpansion: true` (no scenario covers this):
 
 1. Patch each claim to the new size, for instance `kubectl patch pvc data-db-kvrocks-0 -p '{"spec":{"resources":{"requests":{"storage":"50Gi"}}}}'`, and wait until `kubectl get pvc` shows it.
-2. Delete the StatefulSet but not its pods: `kubectl delete statefulset db-kvrocks --cascade=orphan`. The pods keep running and serving.
+2. Delete the StatefulSet but not its pods: `kubectl delete statefulset db-kvrocks --cascade=orphan`. The pods keep running and serving. With `persistence.retentionPolicy.whenDeleted: Delete`, the claims belong to the StatefulSet: set it back to `Retain` with a `helm upgrade` first, rather than count on `--cascade=orphan` to spare them.
 3. Run `helm upgrade` with the new `persistence.size`. The new StatefulSet takes the running pods over without restarting them.
 
 Avoid automatic rollbacks: `helm upgrade --rollback-on-failure` (`--atomic` before Helm 4), or a GitOps tool set to roll back a failed upgrade, takes a release whose new Kvrocks pods are slow to become ready back to the previous image, and Kvrocks does not support going back to an older version. A large volume can take longer to open than Helm waits by default (5 minutes); the startup probe allows 20.
