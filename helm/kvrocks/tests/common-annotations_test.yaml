@@ -1,0 +1,95 @@
+suite: commonAnnotations
+templates:
+  - configmap.yaml
+  - scripts-configmap.yaml
+  - secret.yaml
+  - serviceaccount.yaml
+  - service.yaml
+  - service-read.yaml
+  - service-headless.yaml
+  - statefulset.yaml
+  - poddisruptionbudget.yaml
+  - networkpolicy.yaml
+  - servicemonitor.yaml
+  - prometheusrule.yaml
+  - haproxy/configmap.yaml
+  - haproxy/deployment.yaml
+  - haproxy/poddisruptionbudget.yaml
+  - haproxy/service-metrics.yaml
+  - tests/test-write.yaml
+release:
+  name: db
+  namespace: data
+set:
+  auth.password: test-password
+  metrics.serviceMonitor.enabled: true
+  metrics.prometheusRule.enabled: true
+  networkPolicy.enabled: true
+  commonAnnotations:
+    team: data
+tests:
+  - it: annotates every resource of the release
+    asserts:
+      - isSubset:
+          path: metadata.annotations
+          content:
+            team: data
+
+  - it: leaves the pod templates alone, where a change would restart every pod
+    templates:
+      - statefulset.yaml
+      - haproxy/deployment.yaml
+    asserts:
+      - notExists:
+          path: spec.template.metadata.annotations.team
+
+  - it: leaves the volume claim templates alone, which a StatefulSet cannot change
+    template: statefulset.yaml
+    asserts:
+      - notExists:
+          path: spec.volumeClaimTemplates[0].metadata.annotations
+
+  - it: lets the annotations of a resource win over commonAnnotations
+    template: service.yaml
+    set:
+      service.annotations:
+        team: writes
+    asserts:
+      - equal:
+          path: metadata.annotations.team
+          value: writes
+
+  - it: keeps the hook annotations of the test pod
+    template: tests/test-write.yaml
+    asserts:
+      - isSubset:
+          path: metadata.annotations
+          content:
+            helm.sh/hook: test
+            helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+            team: data
+
+  - it: keeps the Reloader annotation of the StatefulSet
+    template: statefulset.yaml
+    set:
+      tls.enabled: true
+      tls.existingSecret: db-server-tls
+      tls.ca.secret: db-ca
+      tls.reloader: true
+    asserts:
+      - isSubset:
+          path: metadata.annotations
+          content:
+            secret.reloader.stakater.com/reload: db-server-tls,db-ca
+            team: data
+
+  - it: adds no annotations by default
+    set:
+      commonAnnotations: null
+    templates:
+      - configmap.yaml
+      - statefulset.yaml
+      - service.yaml
+    asserts:
+      - notExists:
+          path: metadata.annotations

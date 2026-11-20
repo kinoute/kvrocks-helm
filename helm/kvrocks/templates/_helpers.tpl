@@ -27,6 +27,20 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}
 {{- end }}
 
+{{/*
+The annotations of a resource: its own, which win, then commonAnnotations. Pod templates and
+volume claim templates never take commonAnnotations: a change there would restart every pod,
+and a StatefulSet cannot change its claims at all.
+Usage: include "kvrocks.annotations" (dict "root" . "own" .Values.service.annotations)
+*/}}
+{{- define "kvrocks.annotations" -}}
+{{- $annotations := merge (dict) (default (dict) .own) (default (dict) .root.Values.commonAnnotations) }}
+{{- with $annotations }}
+annotations:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- end }}
+
 {{/* Selector labels of one component. Usage: include "kvrocks.selectorLabels" (dict "root" . "component" "kvrocks") */}}
 {{- define "kvrocks.selectorLabels" -}}
 app.kubernetes.io/name: {{ include "kvrocks.name" .root }}

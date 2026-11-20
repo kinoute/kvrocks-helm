@@ -4,6 +4,9 @@ metadata:
   name: {{ include "kvrocks.scriptsConfigMapName" . }}
   labels:
     {{- include "kvrocks.labels" . | nindent 4 }}
+  {{- with include "kvrocks.annotations" (dict "root" .) }}
+  {{- . | nindent 2 }}
+  {{- end }}
 # The name changes with the content, so the content never has to.
 immutable: true
 data:

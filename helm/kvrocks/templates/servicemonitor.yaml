@@ -8,6 +8,9 @@ metadata:
     {{- with .Values.metrics.serviceMonitor.labels }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
+  {{- with include "kvrocks.annotations" (dict "root" .) }}
+  {{- . | nindent 2 }}
+  {{- end }}
 spec:
   namespaceSelector:
     matchNames:

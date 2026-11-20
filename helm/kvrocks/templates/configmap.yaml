@@ -5,6 +5,9 @@ metadata:
   name: {{ include "kvrocks.fullname" . }}
   labels:
     {{- include "kvrocks.labels" . | nindent 4 }}
+  {{- with include "kvrocks.annotations" (dict "root" .) }}
+  {{- . | nindent 2 }}
+  {{- end }}
 data:
   # The container appends its announce address, the password and its replication role
   # to a writable copy of this file at startup: Kvrocks rewrites its config on failover.

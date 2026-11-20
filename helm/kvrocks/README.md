@@ -58,6 +58,7 @@ For a release named `db`, with the default ports:
 | auth.password | string | `""` | Password stored in a Secret created by the chart. Prefer `existingSecret`. It must not contain whitespace, double quotes or backslashes. |
 | auth.secretKey | string | `"password"` | Key of the password in the Secret. |
 | clusterDomain | string | `"cluster.local"` | DNS domain of the cluster, used to build the pods' fully qualified names. |
+| commonAnnotations | object | `{}` | Annotations added to every resource, but not to the pods, where a change would restart them (`podAnnotations` and `haproxy.podAnnotations` are there for that), nor to the volume claims, which a StatefulSet cannot change. |
 | commonLabels | object | `{}` | Labels added to every resource. |
 | config | object | `{"use-rsid-psync":"yes"}` | Extra `kvrocks.conf` settings, as `key: value`. Settings the chart owns (bind, port, dir, the password, the replication role and priority...) are rejected, and so are `rename-command`, which would hide from the chart's scripts the commands they rely on, and the namespace tokens, which are credentials. |
 | containerSecurityContext | object | `{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true}` | Security context of every container of the Kvrocks pods. |
