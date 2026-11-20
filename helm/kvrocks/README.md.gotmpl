@@ -18,7 +18,7 @@ helm test db
 
 Until a version is tagged, nothing is published to the registry: replace `oci://ghcr.io/kinoute/charts/kvrocks` with `./helm/kvrocks` from a clone of the repository.
 
-Pick `replicaCount` and the password before you install: the chart does not handle changing either afterwards.
+Pick the password before you install: changing it afterwards takes a short write outage, see [Rotating the password]({{ template "chart.homepage" . }}#rotating-the-password).
 
 With clients over mutual TLS, from certificates you created beforehand:
 
@@ -44,7 +44,7 @@ For a release named `db`, with the default ports:
 ## Requirements
 
 - Kubernetes `{{ template "chart.kubeVersion" . }}`: Sentinel and the fencing loop run as native sidecars.
-- As many schedulable nodes as `replicaCount` with the default `podAntiAffinity: hard`.
+- Three schedulable nodes with the default `podAntiAffinity: hard`: each Kvrocks pod needs a node of its own.
 - Kvrocks 2.16.0 or later in `replication` mode, the first version with `CLIENT PAUSE WRITE`.
 - A password without whitespace, double quotes or backslashes: HAProxy sends it in its health checks.
 
