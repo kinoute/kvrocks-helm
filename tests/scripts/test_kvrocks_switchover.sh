@@ -31,10 +31,24 @@ test_a_handover_promotes_a_replica_and_steps_down() {
   assert_called "localhost:26379 sentinel failover kvrocks"
   assert_called "localhost:6379 slaveof kv-1.h 6379"
   assert_called "localhost:6379 client kill type normal"
-  assert_called "localhost:6379 client unpause"
   first_pause=$(calls | grep -n 'client pause' | head -n 1 | cut -d: -f1)
   failover=$(calls | grep -n 'sentinel failover' | cut -d: -f1)
   [ "$first_pause" -lt "$failover" ] || fail "writes must be paused before the failover"
+}
+
+# HAProxy still routes clients to the former master for a few seconds after it steps down.
+# Released, their writes would be refused as read-only; held, HAProxy closes their sessions
+# before any of them runs.
+test_writes_stay_paused_on_the_former_master_once_it_stepped_down() {
+  cluster_ready
+  switchover
+  assert_eq 0 "$STATUS" "exit status"
+  assert_not_called "localhost:6379 client unpause"
+  stepped_down=$(line_of "localhost:6379 slaveof")
+  last_pause=$(calls | grep -n -F "localhost:6379 client pause" | tail -n 1 | cut -d: -f1)
+  [ "$last_pause" -gt "$stepped_down" ] || fail "writes must be paused again once this pod is a replica"
+  [ "$(cat "$WRITE_HOLDS_DIR/handover")" -gt "$(date +%s%3N)" ] ||
+    fail "the handover must still hold the writes when it ends"
 }
 
 test_a_replica_has_nothing_to_hand_over() {

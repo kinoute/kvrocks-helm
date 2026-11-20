@@ -369,7 +369,7 @@ finish_load() { # $1: name of the load
 
 # Fails unless the report shows at most the allowed loss and write outage.
 assert_report() { # $1: scenario, $2: JSON report, $3: max lost writes, $4: max write gap (seconds)
-  local acked lost gap worst_pod
+  local acked lost gap worst_pod read_only
   acked=$(jq -r '.acked' <<<"$2")
   lost=$(jq -r '.lost' <<<"$2")
   gap=$(jq -r '.longest_write_gap_seconds' <<<"$2")
@@ -389,6 +389,12 @@ assert_report() { # $1: scenario, $2: JSON report, $3: max lost writes, $4: max 
     fail "$1: the pods diverged from the master: $(jq -c '.missing_by_pod' <<<"$2")"
   awk -v gap="$gap" -v max="$4" 'BEGIN { exit !(gap <= max) }' ||
     fail "$1: writes were interrupted for ${gap}s (allowed: ${4}s)"
+  # What may lose nothing, a handover above all, must not refuse writes as read-only either:
+  # most clients do not retry that error, and redis-py keeps the connection after it.
+  if [ "$3" = "$NO_LOSS" ]; then
+    read_only=$(jq '.errors.ReadOnlyError // 0' <<<"$2")
+    [ "$read_only" = 0 ] || fail "$1: $read_only writes were refused as read-only"
+  fi
 }
 
 # Writes keys <prefix>:1..<count> through the write endpoint, as a client would.

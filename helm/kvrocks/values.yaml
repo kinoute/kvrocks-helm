@@ -280,6 +280,9 @@ haproxy:
     interval: 1s
     # -- Failed role checks in a row before HAProxy cuts the connections to a Kvrocks.
     # Higher than 1 so that one slow answer from a busy master does not drop every client.
+    # Keep `fall` times `interval` well under `switchover.pauseMilliseconds`: after a
+    # handover, the former master holds writes that long, and HAProxy must cut the
+    # connections still open to it first.
     fall: 3 # @schema minimum:1
   # -- Restarts an HAProxy whose health endpoint stops answering.
   livenessProbe: # @schema additionalProperties:true

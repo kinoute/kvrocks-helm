@@ -401,7 +401,14 @@ if ! demote_to "$new_master"; then
   log "ERROR: $new_master is master but this pod did not step down; its writes stay paused"
   exit 1
 fi
-resume_writes
+# HAProxy still sends clients here for a few seconds: it stops routing new connections to this
+# pod within a second, but closes the sessions already open only after `haproxy.check.fall`
+# failed role checks. A write that ran here now would be refused as read-only, an error most
+# clients do not retry, and redis-py keeps the connection after it: every write that follows
+# fails too. Held, a write never runs: Kvrocks looks at the pause before the role, and HAProxy
+# closes the session first. The client then reconnects to the new master. The pause runs out
+# on its own.
+pause_writes || true
 if [ -n "$target" ] && [ "$new_master" != "$target" ]; then
   log "Sentinel promoted $new_master, not $target"
 fi

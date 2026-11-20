@@ -67,7 +67,7 @@ For a release named `db`, with the default ports:
 | global.imagePullSecrets | list | `[]` | Pull secrets added to every pod. |
 | global.imageRegistry | string | `""` | Registry that replaces the registry of every image (e.g. a pull-through cache). |
 | haproxy.affinity | object | `{}` | Replaces the default affinity, which prefers one HAProxy pod per node. |
-| haproxy.check.fall | int | `3` | Failed role checks in a row before HAProxy cuts the connections to a Kvrocks. Higher than 1 so that one slow answer from a busy master does not drop every client. |
+| haproxy.check.fall | int | `3` | Failed role checks in a row before HAProxy cuts the connections to a Kvrocks. Higher than 1 so that one slow answer from a busy master does not drop every client. Keep `fall` times `interval` well under `switchover.pauseMilliseconds`: after a handover, the former master holds writes that long, and HAProxy must cut the connections still open to it first. |
 | haproxy.check.interval | string | `"1s"` | How often HAProxy asks each Sentinel for the master and each Kvrocks for its role. |
 | haproxy.dnsOutageTolerance | string | `"1h"` | How long HAProxy keeps the last known address of a pod when cluster DNS stops answering. |
 | haproxy.healthPort | int | `8888` | Port of the health endpoints (`/livez`, `/readyz`) and of `/metrics`. |
