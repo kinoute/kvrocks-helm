@@ -63,3 +63,28 @@ tests:
           path: metadata.annotations
           value:
             example.com/owner: data-team
+
+  - it: lets only loadBalancerSourceRanges through a LoadBalancer
+    set:
+      readService.type: LoadBalancer
+      readService.loadBalancerSourceRanges: [10.0.0.0/8]
+    asserts:
+      - equal:
+          path: spec.loadBalancerSourceRanges
+          value: [10.0.0.0/8]
+
+  - it: uses readService.nodePort with type NodePort
+    set:
+      readService.type: NodePort
+      readService.nodePort: 30380
+    asserts:
+      - equal:
+          path: spec.ports[0].nodePort
+          value: 30380
+
+  - it: leaves the node port to Kubernetes by default
+    set:
+      readService.type: NodePort
+    asserts:
+      - notExists:
+          path: spec.ports[0].nodePort
