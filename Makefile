@@ -13,6 +13,8 @@ ALL_FEATURES := --set metrics.serviceMonitor.enabled=true --set metrics.promethe
 TLS := --set tls.enabled=true --set tls.existingSecret=kv-tls --set tls.ca.secret=kv-ca \
 	--set tls.clientSecret=kv-client-tls --set tls.reloader=true
 RENDER := helm template kv $(CHART) --set auth.password=lint
+# The oldest Kubernetes the chart accepts, read from the kubeVersion of Chart.yaml (">=1.34.0-0").
+OLDEST_KUBERNETES := $(shell sed -n 's/^kubeVersion: ">=\([0-9.]*\)-0"$$/\1/p' $(CHART)/Chart.yaml)
 # The second location resolves the Prometheus Operator CRDs.
 KUBECONFORM := kubeconform -strict -summary -schema-location default -schema-location \
 	'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
@@ -46,10 +48,13 @@ schema: ## Regenerates values.schema.json from the annotations in values.yaml
 docs: ## Regenerates the chart's README.md from README.md.gotmpl and values.yaml
 	helm-docs --chart-search-root $(dir $(CHART))
 
-manifests: ## Rendered manifests against the Kubernetes and Prometheus Operator schemas
+manifests: ## Rendered manifests against the Kubernetes and Prometheus Operator schemas, the oldest Kubernetes included
 	$(RENDER) $(ALL_FEATURES) | $(KUBECONFORM)
 	$(RENDER) --set architecture=standalone | $(KUBECONFORM)
 	$(RENDER) $(ALL_FEATURES) $(TLS) | $(KUBECONFORM)
+	@test -n "$(OLDEST_KUBERNETES)" || { echo "cannot read kubeVersion from $(CHART)/Chart.yaml"; exit 1; }
+	$(RENDER) $(ALL_FEATURES) $(TLS) --kube-version $(OLDEST_KUBERNETES) | \
+		$(KUBECONFORM) -kubernetes-version $(OLDEST_KUBERNETES)
 
 unit: ## helm-unittest suites, and pod templates that a new chart version leaves as they are
 	helm unittest $(CHART)

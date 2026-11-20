@@ -37,7 +37,7 @@ flowchart LR
 - The fencing loop pauses the writes of a master that neither a majority of Sentinels nor its replicas follow any more, as when it is cut off from the other pods. Kvrocks has no `min-replicas-to-write`, and without this the connections already open to such a master would keep writing to it until the partition heals. Those writes are lost when it rejoins as a replica. It reaches the other Sentinels by their last known address, so that a cluster DNS outage does not make it pause a healthy master.
 - Everything goes by pod hostnames, never by IP: pod IPs change on every restart.
 - `sentinel.conf` and a writable copy of `kvrocks.conf` live on the data volume. The role of a pod never comes from a ConfigMap, because Sentinel rewrites it at every failover.
-- Sentinel and the fencing loop are native sidecars, hence Kubernetes 1.29 or later: Kubernetes only stops them once Kvrocks has exited, so they are still there while the master hands its role over.
+- Sentinel and the fencing loop are native sidecars: Kubernetes only stops them once Kvrocks has exited, so they are still there while the master hands its role over.
 
 Each pod decides its role when its container starts:
 
@@ -94,7 +94,7 @@ As of 2026-11-16 the chart is not published to a registry yet, so it installs fr
 
 Requirements:
 
-- Kubernetes 1.29 or later.
+- Kubernetes 1.34 or later, the oldest version the end-to-end scenarios run on.
 - Three schedulable nodes: by default each of the three Kvrocks pods needs a node of its own (`podAntiAffinity: hard`).
 - Kvrocks 2.16.0 or later in `replication` mode, the first version with `CLIENT PAUSE WRITE`. The chart refuses an older `image.tag` it can read, and the handover script refuses to run on an older Kvrocks pinned by digest.
 - A password without whitespace, quotes or backslashes: HAProxy sends it in its health checks.
@@ -257,7 +257,7 @@ The Sentinel image is part of the same StatefulSet and goes through the same rol
 
 ### Upgrading Kubernetes
 
-The version itself asks for nothing: the chart needs Kubernetes 1.29 or later and only uses stable APIs. What an upgrade does to the release is drain the nodes, one at a time:
+The version itself asks for nothing: the chart needs Kubernetes 1.34 or later and only uses stable APIs. What an upgrade does to the release is drain the nodes, one at a time:
 
 - When the drained node holds the master, its `preStop` hook hands the role over: writes pause for 2 to 4 s, and none is lost.
 - The PodDisruptionBudgets let one Kvrocks pod and one HAProxy pod go at a time: the next drain waits until the evicted pod is back and ready.
@@ -378,7 +378,7 @@ With data: `large_dataset` wrote 10 GiB shaped like a production workload, 30.4 
 - **Not tested behind a service mesh.**
 - **External replicas can be promoted.** Anything that attaches to the master as a replica, a backup job for instance, is seen by Sentinel as a candidate. Start it with `slave-priority 0`.
 - **`connected_slaves` over-counts.** Kvrocks keeps counting a replica whose pod is gone until TCP gives up on it, minutes later. The alerts look at the replicas instead.
-- **Versions.** Everything was tested with Kvrocks 2.17.0, Valkey Sentinel 9.0.6, HAProxy 3.2.25 and Kubernetes 1.37 on Kind, plus the scenarios that leave the nodes alone on a managed Kubernetes 1.34 with Cilium, and nothing else. Run `make e2e` again before bumping any of them.
+- **Versions.** Everything was tested with Kvrocks 2.17.0, Valkey Sentinel 9.0.6, HAProxy 3.2.25 and Kubernetes 1.37 on Kind, the quick scenarios (`make e2e-quick`) on Kubernetes 1.34 on Kind too, plus the scenarios that leave the nodes alone on a managed Kubernetes 1.34 with Cilium, and nothing else. Run `make e2e` again before bumping any of them.
 - **Full syncs.** A handover or a rolling update does not make replicas copy the whole database again: the end-to-end scenarios check it. After a crash or a plain `SENTINEL FAILOVER`, a former master that holds writes the new one never got does copy everything again, on purpose (`use-rsid-psync yes`). On a large volume that takes a while.
 
 ## Tests
@@ -390,7 +390,7 @@ make e2e         # every failure scenario
 make e2e-cluster CONTEXT=<kube context>   # the scenarios that leave the nodes alone, on a real cluster
 ```
 
-`make test` needs `helm` with the `unittest` and `schema` plugins, `helm-docs`, `shellcheck`, `kubeconform`, `promtool`, `yq`, `uv` and `docker`. After a change to `values.yaml`, `make schema docs` regenerates the schema and the chart's README, which `make lint` checks. The end-to-end targets also need `kind`, `kubectl` and `jq`. On a Linux host, raise the inotify limits first, as in [Kind's known issues](https://kind.sigs.k8s.io/docs/user/known-issues/#pod-errors-due-to-too-many-open-files): the scenarios restart nodes, and each restart takes new instances.
+`make test` needs `helm` with the `unittest` and `schema` plugins, `helm-docs`, `shellcheck`, `kubeconform`, `promtool`, `yq`, `uv` and `docker`. After a change to `values.yaml`, `make schema docs` regenerates the schema and the chart's README, which `make lint` checks. The end-to-end targets also need `kind` v0.33.0, `kubectl` and `jq`. They run on Kubernetes 1.37; `KIND_NODE_IMAGE` picks another node image of that kind release, and the CI also runs `make e2e-quick` on 1.34, the oldest version the chart accepts. On a Linux host, raise the inotify limits first, as in [Kind's known issues](https://kind.sigs.k8s.io/docs/user/known-issues/#pod-errors-due-to-too-many-open-files): the scenarios restart nodes, and each restart takes new instances.
 
 The scripts that run in the pods have unit tests of their own in [`tests/scripts`](tests/scripts): each runs in the image it runs in production, dash for Kvrocks and busybox for Sentinel, against a fake `redis-cli` that plays a whole cluster, unreachable hosts and DNS outages included.
 

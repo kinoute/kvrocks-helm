@@ -6,6 +6,9 @@ REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 E2E_DIR="$REPO_ROOT/tests/e2e"
 
 CLUSTER_NAME=${CLUSTER_NAME:-kvrocks-e2e}
+# The Kubernetes of the Kind nodes: the newest the chart is tested on, built for kind v0.33.0.
+# The CI also runs the quick scenarios on the oldest, the kubeVersion of Chart.yaml.
+KIND_NODE_IMAGE=${KIND_NODE_IMAGE:-kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5}
 # E2E_CONTEXT runs the scenarios on an existing cluster instead of Kind: only those that leave
 # the nodes and the rest of the cluster alone, in a namespace of their own (see run.sh).
 E2E_CONTEXT=${E2E_CONTEXT:-}
