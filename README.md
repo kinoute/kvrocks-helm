@@ -50,6 +50,7 @@ When a master has to stop (rolling update, drain), its `preStop` hook hands the 
 1. It pauses client writes.
 2. It checks that every replica Sentinel could promote has received every write. Sentinel ranks replicas with offsets it read up to ten seconds earlier, so it may pick any of them.
 3. It asks Sentinel to fail over, keeps writes paused until the new master is announced, then demotes itself.
+4. It keeps writes paused on itself, now a replica, for `switchover.pauseMilliseconds` more. HAProxy closes the connections still open to it after `haproxy.check.fall` failed role checks, before any of their writes runs: clients get a connection error and reconnect to the new master. Released at once, those writes would be refused as read-only, an error most clients do not retry, and redis-py keeps the connection after it, so every write that follows on it fails too.
 
 If a replica is behind, the handover gives up and writes stay paused until the pod stops. It gives up the same way when the master took a write the pause did not hold, or when the checks left too little of the pause for Sentinel to answer before it runs out. The failover that follows is then slower, about 15 s instead of 3 s, but it promotes an up-to-date replica and loses nothing (scenario `handover_aborted_on_stop`).
 
