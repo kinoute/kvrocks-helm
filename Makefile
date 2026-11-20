@@ -12,6 +12,14 @@ ALL_FEATURES := --set metrics.serviceMonitor.enabled=true --set metrics.promethe
 	--set networkPolicy.enabled=true
 TLS := --set tls.enabled=true --set tls.existingSecret=kv-tls --set tls.ca.secret=kv-ca \
 	--set tls.clientSecret=kv-client-tls --set tls.reloader=true
+# Every value that extends the pods and the Services, so that their schemas are checked too.
+EXTENSIONS := --set commonAnnotations.team=data --set persistence.retentionPolicy.whenDeleted=Delete \
+	--set service.type=LoadBalancer --set 'service.loadBalancerSourceRanges={10.0.0.0/8}' \
+	--set readService.type=NodePort --set readService.nodePort=30380 \
+	--set-json 'extraEnv=[{"name":"TZ","value":"UTC"}]' \
+	--set-json 'extraVolumes=[{"name":"backup","emptyDir":{}}]' \
+	--set-json 'extraVolumeMounts=[{"name":"backup","mountPath":"/backup"}]' \
+	--set-json 'sidecars=[{"name":"backup-agent","image":"busybox:1.37","volumeMounts":[{"name":"data","mountPath":"/data","readOnly":true}]}]'
 RENDER := helm template kv $(CHART) --set auth.password=lint
 # The oldest Kubernetes the chart accepts, read from the kubeVersion of Chart.yaml (">=1.34.0-0").
 OLDEST_KUBERNETES := $(shell sed -n 's/^kubeVersion: ">=\([0-9.]*\)-0"$$/\1/p' $(CHART)/Chart.yaml)
@@ -51,9 +59,9 @@ docs: ## Regenerates the chart's README.md from README.md.gotmpl and values.yaml
 manifests: ## Rendered manifests against the Kubernetes and Prometheus Operator schemas, the oldest Kubernetes included
 	$(RENDER) $(ALL_FEATURES) | $(KUBECONFORM)
 	$(RENDER) --set architecture=standalone | $(KUBECONFORM)
-	$(RENDER) $(ALL_FEATURES) $(TLS) | $(KUBECONFORM)
+	$(RENDER) $(ALL_FEATURES) $(TLS) $(EXTENSIONS) | $(KUBECONFORM)
 	@test -n "$(OLDEST_KUBERNETES)" || { echo "cannot read kubeVersion from $(CHART)/Chart.yaml"; exit 1; }
-	$(RENDER) $(ALL_FEATURES) $(TLS) --kube-version $(OLDEST_KUBERNETES) | \
+	$(RENDER) $(ALL_FEATURES) $(TLS) $(EXTENSIONS) --kube-version $(OLDEST_KUBERNETES) | \
 		$(KUBECONFORM) -kubernetes-version $(OLDEST_KUBERNETES)
 
 unit: ## helm-unittest suites, and pod templates that a new chart version leaves as they are
