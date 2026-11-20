@@ -17,6 +17,28 @@ keywords:
   - rocksdb
   - sentinel
   - high-availability
+icon: https://kvrocks.apache.org/img/logo.svg
 maintainers:
   - name: kinoute
     url: https://github.com/kinoute
+annotations:
+  artifacthub.io/license: Apache-2.0
+  # Written by hand: tests/chart/images.sh checks that it lists the images the chart deploys.
+  artifacthub.io/images: |
+    - name: kvrocks
+      image: docker.io/apache/kvrocks:2.17.0
+    - name: sentinel
+      image: docker.io/valkey/valkey:9.0.6-alpine
+    - name: haproxy
+      image: docker.io/haproxy:3.2.25-alpine
+    - name: kvrocks-exporter
+      image: docker.io/kvrocks/kvrocks-exporter:1.0.11
+  artifacthub.io/changes: |
+    - kind: added
+      description: Kvrocks with replication, Sentinel failover and an HAProxy write endpoint that follows the master
+    - kind: added
+      description: A master handover that loses no acknowledged write on a rolling update or a node drain
+    - kind: added
+      description: Fencing of a master cut off from its peers
+    - kind: added
+      description: Client TLS, metrics, alerts, a NetworkPolicy, and values to extend the Kvrocks pods
