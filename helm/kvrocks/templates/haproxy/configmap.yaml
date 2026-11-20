@@ -8,6 +8,9 @@ metadata:
   labels:
     {{- include "kvrocks.labels" . | nindent 4 }}
     app.kubernetes.io/component: haproxy
+  {{- with include "kvrocks.annotations" (dict "root" .) }}
+  {{- . | nindent 2 }}
+  {{- end }}
 data:
   haproxy.cfg: |
     global

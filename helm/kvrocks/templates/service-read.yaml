@@ -6,9 +6,8 @@ metadata:
   labels:
     {{- include "kvrocks.labels" . | nindent 4 }}
     app.kubernetes.io/component: kvrocks
-  {{- with .Values.readService.annotations }}
-  annotations:
-    {{- toYaml . | nindent 4 }}
+  {{- with include "kvrocks.annotations" (dict "root" . "own" .Values.readService.annotations) }}
+  {{- . | nindent 2 }}
   {{- end }}
 spec:
   type: {{ .Values.readService.type }}

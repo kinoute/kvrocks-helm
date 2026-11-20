@@ -6,6 +6,9 @@ metadata:
   labels:
     {{- include "kvrocks.labels" . | nindent 4 }}
     app.kubernetes.io/component: kvrocks
+  {{- with include "kvrocks.annotations" (dict "root" .) }}
+  {{- . | nindent 2 }}
+  {{- end }}
 spec:
   # A replica that is still syncing is not ready and counts as unavailable, so a drain
   # never takes a second pod while one is catching up.

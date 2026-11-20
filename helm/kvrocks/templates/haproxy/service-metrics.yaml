@@ -6,6 +6,9 @@ metadata:
   labels:
     {{- include "kvrocks.labels" . | nindent 4 }}
     app.kubernetes.io/component: haproxy
+  {{- with include "kvrocks.annotations" (dict "root" .) }}
+  {{- . | nindent 2 }}
+  {{- end }}
 spec:
   type: ClusterIP
   # Headless and separate from the write Service: metrics are scraped pod by pod, and

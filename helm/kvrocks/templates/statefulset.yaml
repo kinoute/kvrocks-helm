@@ -1,5 +1,9 @@
 {{- $replication := include "kvrocks.isReplication" . }}
 {{- $selectorLabels := include "kvrocks.selectorLabels" (dict "root" . "component" "kvrocks") }}
+{{- $annotations := dict }}
+{{- if and .Values.tls.enabled .Values.tls.reloader }}
+{{- $_ := set $annotations "secret.reloader.stakater.com/reload" (compact (list .Values.tls.existingSecret .Values.tls.ca.secret) | join ",") }}
+{{- end }}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -7,9 +11,8 @@ metadata:
   labels:
     {{- include "kvrocks.labels" . | nindent 4 }}
     app.kubernetes.io/component: kvrocks
-  {{- if and .Values.tls.enabled .Values.tls.reloader }}
-  annotations:
-    secret.reloader.stakater.com/reload: {{ compact (list .Values.tls.existingSecret .Values.tls.ca.secret) | join "," | quote }}
+  {{- with include "kvrocks.annotations" (dict "root" . "own" $annotations) }}
+  {{- . | nindent 2 }}
   {{- end }}
 spec:
   replicas: {{ include "kvrocks.replicaCount" . }}

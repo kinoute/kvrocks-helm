@@ -6,6 +6,10 @@ fullnameOverride: ""
 clusterDomain: cluster.local
 # -- Labels added to every resource.
 commonLabels: {} # @schema additionalProperties:true
+# -- Annotations added to every resource, but not to the pods, where a change would restart
+# them (`podAnnotations` and `haproxy.podAnnotations` are there for that), nor to the volume
+# claims, which a StatefulSet cannot change.
+commonAnnotations: {} # @schema additionalProperties:true
 
 # Open to any key: as a dependency of another chart, this chart receives every global
 # value of its parent.

@@ -7,9 +7,8 @@ metadata:
   labels:
     {{- include "kvrocks.labels" . | nindent 4 }}
     app.kubernetes.io/component: {{ ternary "haproxy" "kvrocks" (not (empty $haproxy)) }}
-  {{- with .Values.service.annotations }}
-  annotations:
-    {{- toYaml . | nindent 4 }}
+  {{- with include "kvrocks.annotations" (dict "root" . "own" .Values.service.annotations) }}
+  {{- . | nindent 2 }}
   {{- end }}
 spec:
   type: {{ .Values.service.type }}
