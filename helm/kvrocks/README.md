@@ -43,7 +43,7 @@ For a release named `db`, with the default ports:
 
 ## Requirements
 
-- Kubernetes `>=1.29.0-0`: Sentinel and the fencing loop run as native sidecars.
+- Kubernetes `>=1.34.0-0`, the oldest version the end-to-end scenarios run on. Sentinel and the fencing loop run as native sidecars.
 - Three schedulable nodes with the default `podAntiAffinity: hard`: each Kvrocks pod needs a node of its own.
 - Kvrocks 2.16.0 or later in `replication` mode, the first version with `CLIENT PAUSE WRITE`.
 - A password without whitespace, double quotes or backslashes: HAProxy sends it in its health checks.

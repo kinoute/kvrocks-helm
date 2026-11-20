@@ -3,6 +3,9 @@
 #
 # Usage: tests/e2e/run.sh [scenario ...]    every scenario, in order, by default
 #        KEEP_CLUSTER=1 tests/e2e/run.sh    keeps the cluster afterwards, to look around
+#        KIND_NODE_IMAGE=kindest/node:<version> tests/e2e/run.sh
+#                                           runs on another Kubernetes, with a node image
+#                                           of the kind release installed
 #        E2E_CONTEXT=<context> tests/e2e/run.sh
 #                                           runs on an existing cluster instead, in its own
 #                                           namespace, the scenarios of CLUSTER_SCENARIOS only
@@ -92,7 +95,8 @@ ensure_cluster() {
       docker network create --driver bridge --subnet "$NODE_SUBNET" \
         --opt com.docker.network.bridge.enable_ip_masquerade=true "$NODE_NETWORK" >/dev/null
     KIND_EXPERIMENTAL_DOCKER_NETWORK=$NODE_NETWORK \
-      kind create cluster --name "$CLUSTER_NAME" --config "$E2E_DIR/kind.yaml" --kubeconfig "$KUBECONFIG"
+      kind create cluster --name "$CLUSTER_NAME" --config "$E2E_DIR/kind.yaml" --image "$KIND_NODE_IMAGE" \
+        --kubeconfig "$KUBECONFIG"
   fi
   kubectl wait --for=condition=Ready nodes --all --timeout=180s >/dev/null
   pin_cluster_dns_to_control_plane
