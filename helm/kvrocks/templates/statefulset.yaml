@@ -22,6 +22,12 @@ spec:
   podManagementPolicy: Parallel
   updateStrategy:
     type: RollingUpdate
+  {{- if .Values.persistence.enabled }}
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: {{ .Values.persistence.retentionPolicy.whenDeleted }}
+    # The pod count never shrinks: replication runs exactly 3 pods, standalone 1.
+    whenScaled: Retain
+  {{- end }}
   selector:
     matchLabels:
       {{- $selectorLabels | nindent 6 }}

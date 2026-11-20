@@ -473,6 +473,19 @@
           "properties": {},
           "type": "object"
         },
+        "retentionPolicy": {
+          "additionalProperties": false,
+          "properties": {
+            "whenDeleted": {
+              "enum": [
+                "Retain",
+                "Delete"
+              ],
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
         "size": {
           "type": "string"
         },

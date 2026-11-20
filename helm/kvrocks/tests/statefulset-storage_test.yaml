@@ -87,3 +87,41 @@ tests:
           content:
             name: data
             emptyDir: {}
+
+  - it: keeps the volume claims when the StatefulSet is deleted, by default
+    template: statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.persistentVolumeClaimRetentionPolicy
+          value:
+            whenDeleted: Retain
+            whenScaled: Retain
+
+  - it: deletes the volume claims with the StatefulSet when asked to
+    template: statefulset.yaml
+    set:
+      persistence.retentionPolicy.whenDeleted: Delete
+    asserts:
+      - equal:
+          path: spec.persistentVolumeClaimRetentionPolicy.whenDeleted
+          value: Delete
+      - equal:
+          path: spec.persistentVolumeClaimRetentionPolicy.whenScaled
+          value: Retain
+
+  - it: sets no retention policy without volume claims
+    template: statefulset.yaml
+    set:
+      architecture: standalone
+      persistence.enabled: false
+    asserts:
+      - notExists:
+          path: spec.persistentVolumeClaimRetentionPolicy
+
+  - it: refuses a retention policy Kubernetes does not know
+    template: statefulset.yaml
+    set:
+      persistence.retentionPolicy.whenDeleted: Keep
+    asserts:
+      - failedTemplate:
+          errorPattern: whenDeleted
