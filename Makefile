@@ -65,9 +65,10 @@ manifests: ## Rendered manifests against the Kubernetes and Prometheus Operator 
 	$(RENDER) $(ALL_FEATURES) $(TLS) $(EXTENSIONS) --kube-version $(OLDEST_KUBERNETES) | \
 		$(KUBECONFORM) -kubernetes-version $(OLDEST_KUBERNETES)
 
-unit: ## helm-unittest suites, and pod templates that a new chart version leaves as they are
+unit: ## helm-unittest suites, pod templates that a new chart version leaves as they are, images listed for ArtifactHub
 	helm unittest $(CHART)
 	tests/chart/pod-templates.sh
+	tests/chart/images.sh
 
 scripts: ## Unit tests of the pod scripts against a fake redis-cli, in their own images (needs docker)
 	tests/scripts/run.sh
