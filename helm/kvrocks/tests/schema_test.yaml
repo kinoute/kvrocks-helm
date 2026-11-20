@@ -62,3 +62,17 @@ tests:
       containerSecurityContext.capabilities.add: [NET_BIND_SERVICE]
     asserts:
       - notFailedTemplate: {}
+
+  - it: accepts the global values of a parent chart, which every dependency receives
+    set:
+      global.storageClass: fast
+      global.security.allowInsecureImages: true
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: still checks the global values the chart reads
+    set:
+      global.imageRegistry: [registry.example.com]
+    asserts:
+      - failedTemplate:
+          errorPattern: imageRegistry

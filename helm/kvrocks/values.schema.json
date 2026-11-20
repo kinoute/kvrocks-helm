@@ -91,7 +91,7 @@
       "type": "string"
     },
     "global": {
-      "additionalProperties": false,
+      "additionalProperties": true,
       "properties": {
         "imagePullSecrets": {
           "type": "array"
