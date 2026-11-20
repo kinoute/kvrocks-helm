@@ -175,6 +175,9 @@ spec:
           command: ["/scripts/kvrocks-start.sh"]
           env:
             {{- include "kvrocks.topologyEnv" . | nindent 12 }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           ports:
             - name: kvrocks
               containerPort: {{ .Values.port }}
@@ -225,6 +228,9 @@ spec:
               readOnly: true
             {{- end }}
             {{- end }}
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
         {{- if .Values.metrics.enabled }}
         - name: metrics
           image: {{ include "kvrocks.image" (dict "root" . "image" .Values.metrics.image "defaultTag" "") }}
@@ -247,6 +253,9 @@ spec:
           {{- end }}
           securityContext:
             {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+        {{- end }}
+        {{- with .Values.sidecars }}
+        {{- toYaml . | nindent 8 }}
         {{- end }}
       volumes:
         - name: config
@@ -283,6 +292,9 @@ spec:
         {{- if not .Values.persistence.enabled }}
         - name: data
           emptyDir: {}
+        {{- end }}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
         {{- end }}
   {{- if .Values.persistence.enabled }}
   volumeClaimTemplates:

@@ -147,6 +147,20 @@ podAntiAffinity: hard # @schema enum:[hard,soft]
 # -- Replaces the default affinity entirely.
 affinity: {} # @schema additionalProperties:true
 
+# -- Extra environment variables of the kvrocks container, as Kubernetes `env` entries. The
+# names the chart sets are rejected.
+extraEnv: []
+# -- Extra volumes of the Kvrocks pods, for `extraVolumeMounts` and `sidecars`. The names of
+# the chart's volumes (`data`, `config`, `scripts`, `tmp`, `tls-server`, `tls-ca`) are rejected.
+extraVolumes: []
+# -- Extra volume mounts of the kvrocks container. Paths under the chart's own mounts
+# (`/var/lib/kvrocks`, `/etc/kvrocks`, `/scripts`, `/tmp`, `/tls`) are rejected.
+extraVolumeMounts: []
+# -- Extra containers of the Kvrocks pods, a backup agent for instance, which can mount the
+# `data` volume. A sidecar that is not ready makes its pod not ready, which the read Service
+# and the PodDisruptionBudget count.
+sidecars: []
+
 # -- Seconds a pod gets to stop: the master handover, then Kvrocks flushing its WAL. At
 # least `switchover.pauseMilliseconds` plus `sentinel.failoverTimeoutMilliseconds`, plus 30 s.
 terminationGracePeriodSeconds: 120

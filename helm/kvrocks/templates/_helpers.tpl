@@ -217,6 +217,40 @@ bind port dir pidfile log-dir daemonize cluster-enabled requirepass masterauth s
 {{- fail "readService.loadBalancerSourceRanges needs readService.type LoadBalancer: no other type filters the clients" }}
 {{- end }}
 {{- /*
+What extends the Kvrocks pods must not replace what the chart sets: a duplicate environment
+variable or volume would silently take its place, and a mount over one of the chart's paths would
+hide its data, its scripts or the write pauses its containers share. The scripts also read two
+settings from the environment: a write-holds directory of its own would let the fence lift a pause
+the handover holds.
+*/}}
+{{- $chartEnv := list "WRITE_HOLDS_DIR" "PRIORITY_SEEN_TIMEOUT_SECONDS" }}
+{{- range (include "kvrocks.topologyEnv" . | fromYamlArray) }}
+{{- $chartEnv = append $chartEnv .name }}
+{{- end }}
+{{- range .Values.extraEnv }}
+{{- if has .name $chartEnv }}
+{{- fail (printf "extraEnv: %s is set by the chart" .name) }}
+{{- end }}
+{{- end }}
+{{- range .Values.extraVolumes }}
+{{- if has .name (list "data" "config" "scripts" "tmp" "tls-server" "tls-ca") }}
+{{- fail (printf "extraVolumes: the chart already has a volume named %s" .name) }}
+{{- end }}
+{{- end }}
+{{- range .Values.extraVolumeMounts }}
+{{- $path := clean .mountPath }}
+{{- range $chartPath := list "/var/lib/kvrocks" "/etc/kvrocks" "/scripts" "/tmp" "/tls" }}
+{{- if or (eq $path $chartPath) (hasPrefix (printf "%s/" $chartPath) $path) }}
+{{- fail (printf "extraVolumeMounts: %s is under %s, which the chart mounts" $path $chartPath) }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- range .Values.sidecars }}
+{{- if has .name (list "kvrocks" "metrics" "sentinel" "fence") }}
+{{- fail (printf "sidecars: the chart already has a container named %s" .name) }}
+{{- end }}
+{{- end }}
+{{- /*
 Kvrocks reads a key in any case, and a value with a line break adds a line of its own: either
 would slip a reserved setting past the check below. The namespace tokens are credentials, and
 `config` is stored in a ConfigMap, in clear.

@@ -498,3 +498,75 @@ tests:
     asserts:
       - failedTemplate:
           errorMessage: "readService.loadBalancerSourceRanges needs readService.type LoadBalancer: no other type filters the clients"
+
+  # --- Extensions of the Kvrocks pods ---
+
+  - it: refuses an extra environment variable the chart sets, which would replace it
+    set:
+      extraEnv:
+        - name: KVROCKS_PASSWORD
+          value: other
+    asserts:
+      - failedTemplate:
+          errorMessage: "extraEnv: KVROCKS_PASSWORD is set by the chart"
+
+  - it: refuses a write-holds directory of its own, which the fence would not see
+    set:
+      extraEnv:
+        - name: WRITE_HOLDS_DIR
+          value: /var/tmp
+    asserts:
+      - failedTemplate:
+          errorMessage: "extraEnv: WRITE_HOLDS_DIR is set by the chart"
+
+  - it: accepts an extra environment variable of its own
+    set:
+      extraEnv:
+        - name: TZ
+          value: UTC
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: refuses an extra volume named like one of the chart's
+    set:
+      extraVolumes:
+        - name: data
+          emptyDir: {}
+    asserts:
+      - failedTemplate:
+          errorMessage: "extraVolumes: the chart already has a volume named data"
+
+  - it: refuses a mount under the data directory
+    set:
+      extraVolumeMounts:
+        - name: backup
+          mountPath: /var/lib/kvrocks/backup
+    asserts:
+      - failedTemplate:
+          errorMessage: "extraVolumeMounts: /var/lib/kvrocks/backup is under /var/lib/kvrocks, which the chart mounts"
+
+  - it: refuses a mount over the scripts, written with a trailing slash
+    set:
+      extraVolumeMounts:
+        - name: other
+          mountPath: /scripts/
+    asserts:
+      - failedTemplate:
+          errorMessage: "extraVolumeMounts: /scripts is under /scripts, which the chart mounts"
+
+  - it: accepts a mount next to the chart's paths that merely starts like one
+    set:
+      extraVolumeMounts:
+        - name: backup
+          mountPath: /var/lib/kvrocks-backup
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: refuses a sidecar named like one of the chart's containers
+    set:
+      sidecars:
+        - name: fence
+          image: busybox
+    asserts:
+      - failedTemplate:
+          errorMessage: "sidecars: the chart already has a container named fence"
