@@ -1,3 +1,7 @@
+# pipefail: kubeconform passes on an empty input, so a render that fails must fail the
+# pipeline itself. In SHELL: the make 3.81 of macOS ignores .SHELLFLAGS.
+SHELL := bash -o pipefail
+
 CHART := helm/kvrocks
 SCRIPTS := $(CHART)/files/scripts/*.sh tests/e2e/*.sh tests/prometheus/run.sh \
 	tests/scripts/run.sh tests/scripts/harness.sh tests/scripts/fake/* tests/chart/*.sh
