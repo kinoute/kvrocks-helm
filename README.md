@@ -75,14 +75,14 @@ The chart is published to `oci://ghcr.io/kinoute/charts/kvrocks`, signed with co
 2. Install the chart.
 
    ```bash
-   helm install db oci://ghcr.io/kinoute/charts/kvrocks --version 1.0.0 \
+   helm install db oci://ghcr.io/kinoute/charts/kvrocks --version 2.0.0 \
      --set auth.existingSecret=kvrocks-auth
    ```
 
    To check the signature first, with [cosign](https://docs.sigstore.dev/cosign/system_config/installation/):
 
    ```bash
-   cosign verify ghcr.io/kinoute/charts/kvrocks:1.0.0 \
+   cosign verify ghcr.io/kinoute/charts/kvrocks:2.0.0 \
      --certificate-identity-regexp '^https://github\.com/kinoute/kvrocks-helm/\.github/workflows/ci\.yaml@refs/tags/v' \
      --certificate-oidc-issuer https://token.actions.githubusercontent.com
    ```
@@ -243,6 +243,8 @@ On data with no `sentinel/sentinel.conf` next to it, restored or migrated, pod 0
 ### Upgrading the chart
 
 A new version of the chart restarts the pods only when it changes what they run: an image, the configuration of Kvrocks or of HAProxy, or the scripts. The rolling update then restarts every Kvrocks pod, with one handover of the master. A version that changes none of these, a new alert rule for instance, restarts nothing: test `tests/chart/pod-templates.sh` checks it on every change.
+
+From 1.x to 2.0.0, the chart refuses a block cache larger than half of `resources.limits.memory` (see [Sizing](#sizing)). A release with a memory limit under 8 GiB and no `rocksdb.block_cache_size` in `config` caches 4 GB of blocks, so its upgrade fails: set the cache first, to the value the error gives or less. The upgrade itself restarts no pod.
 
 Some values cannot change once the release is installed. Kubernetes refuses any change to the volume claims of a StatefulSet, so `helm upgrade` fails on a new `persistence.size`, `persistence.storageClass` or `persistence.accessModes`. `nameOverride` and `fullnameOverride` rename every resource and change the selector of the StatefulSet. The port in clear has its own section under [TLS](#tls).
 

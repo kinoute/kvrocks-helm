@@ -4,7 +4,7 @@ description: >-
   Apache Kvrocks with replication and automatic failover: one master and its replicas,
   Sentinel for failover, HAProxy as a write endpoint that follows the master.
 type: application
-version: 1.0.0
+version: 2.0.0
 appVersion: "2.17.0"
 kubeVersion: ">=1.34.0-0"
 home: https://github.com/kinoute/kvrocks-helm
@@ -40,11 +40,9 @@ annotations:
     - name: kvrocks-exporter
       image: docker.io/kvrocks/kvrocks-exporter:1.0.11
   artifacthub.io/changes: |
+    - kind: changed
+      description: The install or upgrade fails when the block cache, 4096 MB unless config sets rocksdb.block_cache_size, is more than half of resources.limits.memory
     - kind: added
-      description: Kvrocks with replication, Sentinel failover and an HAProxy write endpoint that follows the master
+      description: helm test checks that every replica got the write and that the read Service serves it
     - kind: added
-      description: A master handover that loses no acknowledged write on a rolling update or a node drain
-    - kind: added
-      description: Fencing of a master cut off from its peers
-    - kind: added
-      description: Client TLS, metrics, alerts, a NetworkPolicy, and values to extend the Kvrocks pods
+      description: Client examples, the cost of each failure and a FAQ in the chart's README
