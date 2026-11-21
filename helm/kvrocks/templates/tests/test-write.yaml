@@ -1,8 +1,13 @@
 {{- $tls := .Values.tls.enabled }}
 {{- /* Under mTLS the test needs a client certificate of its own. */}}
 {{- $canConnect := or (not $tls) (not .Values.tls.authClients) .Values.tls.clientSecret }}
+{{- $readHost := "" }}
+{{- if and .Values.readService.enabled (include "kvrocks.isReplication" .) }}
+{{- $readHost = printf "%s-read" (include "kvrocks.fullname" .) }}
+{{- end }}
 {{- if $canConnect }}
-# `helm test`: a write through the write endpoint must be accepted and read back.
+# `helm test`: a write through the write endpoint must be accepted, read back, reach every
+# replica, and be served by the read Service.
 apiVersion: v1
 kind: Pod
 metadata:
@@ -29,6 +34,12 @@ spec:
           value: {{ include "kvrocks.fullname" . }}
         - name: WRITE_PORT
           value: {{ .Values.service.port | quote }}
+        - name: REPLICAS
+          value: {{ sub (int (include "kvrocks.replicaCount" .)) 1 | quote }}
+        - name: READ_HOST
+          value: {{ $readHost | quote }}
+        - name: READ_PORT
+          value: {{ .Values.readService.port | quote }}
         - name: TLS_ARGS
           {{- if not $tls }}
           value: ""
@@ -42,11 +53,35 @@ spec:
         - -ec
         - |
           export REDISCLI_AUTH="${KVROCKS_PASSWORD:-}"
-          cli() { MALLOC_CONF= redis-cli -h "$WRITE_HOST" -p "$WRITE_PORT" $TLS_ARGS "$@"; }
+          WAIT_TIMEOUT_MS=5000
+          cli() { # $1: host, $2: port, then a command
+            host="$1" port="$2"
+            shift 2
+            MALLOC_CONF= redis-cli -h "$host" -p "$port" $TLS_ARGS "$@"
+          }
+          write() { cli "$WRITE_HOST" "$WRITE_PORT" "$@"; }
           key="helm-test:$(date +%s)"
-          cli set "$key" ok | grep -q OK
-          cli get "$key" | grep -q ok
-          cli del "$key" >/dev/null
+          write set "$key" ok | grep -q OK
+          write get "$key" | grep -q ok
+          # The master tells which replicas hold the write, with WAIT through the write
+          # endpoint: the server certificate covers the Services, not the names of the pods.
+          # A replica acknowledges at most once a second unless asked: should the first
+          # write fall in that second, a second write gets an acknowledgement of its own.
+          if [ "$REPLICAS" -gt 0 ]; then
+            acked=$(write wait "$REPLICAS" "$WAIT_TIMEOUT_MS")
+            if [ "$acked" != "$REPLICAS" ]; then
+              write set "$key" ok | grep -q OK
+              acked=$(write wait "$REPLICAS" "$WAIT_TIMEOUT_MS")
+            fi
+            if [ "$acked" != "$REPLICAS" ]; then
+              echo "the write reached ${acked:-no} of the $REPLICAS replicas" >&2
+              exit 1
+            fi
+          fi
+          if [ -n "$READ_HOST" ]; then
+            cli "$READ_HOST" "$READ_PORT" get "$key" | grep -q ok
+          fi
+          write del "$key" >/dev/null
       securityContext:
         {{- toYaml .Values.containerSecurityContext | nindent 8 }}
       {{- if and $tls .Values.tls.clientSecret }}
