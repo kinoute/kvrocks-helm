@@ -116,9 +116,10 @@ persistence:
 
 # -- Resources of the Kvrocks container. Without any, the pods run as BestEffort and are the
 # first evicted under memory pressure. Kvrocks caches up to 4 GB of blocks by default, on
-# top of its write buffers: with a memory limit, shrink that cache in `config`, or the
-# master is killed for running out of memory, with no handover. The example below is what
-# the scenarios run with on a real cluster.
+# top of its write buffers, and a master killed for running out of memory hands nothing
+# over: with a memory limit, the chart refuses a block cache (`rocksdb.block_cache_size` in
+# `config`, 4096 MB unless set) larger than half of it. The example below is what the
+# scenarios run with on a real cluster.
 resources: {} # @schema additionalProperties:true
 #  requests:
 #    cpu: 500m
