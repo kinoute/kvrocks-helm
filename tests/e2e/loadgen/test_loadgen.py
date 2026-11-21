@@ -161,3 +161,63 @@ def test_tls_options_present_the_mounted_client_certificate(
     assert options["ssl"] is True
     assert options["ssl_certfile"] == "/tls/tls.crt"
     assert options["ssl_check_hostname"] is False
+
+
+def test_error_bursts_groups_errors_of_one_kind_close_in_time() -> None:
+    # Arrange
+    error_times = [("ReadOnlyError", 10.0), ("ReadOnlyError", 10.4), ("ReadOnlyError", 11.2)]
+
+    # Act
+    bursts = loadgen.error_bursts(error_times, within=1.0)
+
+    # Assert
+    assert bursts == [loadgen.ErrorBurst(kind="ReadOnlyError", start=10.0, end=11.2, count=3)]
+
+
+def test_error_bursts_starts_a_new_burst_after_a_longer_pause() -> None:
+    # Arrange
+    error_times = [("ConnectionError", 5.0), ("ConnectionError", 5.5), ("ConnectionError", 8.0)]
+
+    # Act
+    bursts = loadgen.error_bursts(error_times, within=1.0)
+
+    # Assert
+    assert [(burst.start, burst.count) for burst in bursts] == [(5.0, 2), (8.0, 1)]
+
+
+def test_error_bursts_keeps_kinds_apart_in_the_order_they_started() -> None:
+    # Arrange: two workers' errors, not in time order, interleaved kinds.
+    error_times = [
+        ("ReadOnlyError", 20.3),
+        ("TimeoutError", 20.0),
+        ("ReadOnlyError", 20.1),
+        ("TimeoutError", 20.6),
+    ]
+
+    # Act
+    bursts = loadgen.error_bursts(error_times, within=1.0)
+
+    # Assert
+    assert bursts == [
+        loadgen.ErrorBurst(kind="TimeoutError", start=20.0, end=20.6, count=2),
+        loadgen.ErrorBurst(kind="ReadOnlyError", start=20.1, end=20.3, count=2),
+    ]
+
+
+def test_error_bursts_without_errors_is_empty() -> None:
+    # Act
+    bursts = loadgen.error_bursts([], within=1.0)
+
+    # Assert
+    assert bursts == []
+
+
+def test_time_of_day_gives_the_utc_time_to_the_millisecond() -> None:
+    # Arrange: the run started at 2026-11-21 07:44:16.000 UTC, monotonic time 100.
+    wall_clock_at_start = 1795247056.0
+
+    # Act
+    moment = loadgen.time_of_day(wall_clock_at_start, started=100.0, monotonic=107.5123)
+
+    # Assert
+    assert moment == "07:44:23.512"
