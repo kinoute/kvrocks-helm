@@ -240,6 +240,14 @@ describe_cluster() {
     k exec "$(pod_name "$ordinal")" -c kvrocks -- tail -n 6 /var/lib/kvrocks/handover.log 2>/dev/null |
       sed "s|^|    $(pod_name "$ordinal")/handover.log: |" | cut -c1-220
   done
+  # When HAProxy marked each server up, down or in maintenance (a pod name that stops
+  # resolving), to be matched with the error bursts of the load. HAProxy logs no time of its
+  # own: kubectl adds it.
+  for pod in $(k get pods -l "app.kubernetes.io/instance=$RELEASE,app.kubernetes.io/component=haproxy" -o name 2>/dev/null); do
+    k logs "$pod" --timestamps --tail=400 2>/dev/null |
+      grep -E 'Server [a-z_]+[0-9]+/|backend [a-z_]+[0-9]+ has no server' | tail -n 40 |
+      sed "s|^|    ${pod#pod/}: |" | cut -c1-240
+  done
   # What each Sentinel did last. One in TILT mode stalls a handover without a word.
   for ordinal in $(ordinals); do
     k logs "$(pod_name "$ordinal")" -c sentinel --tail=200 2>/dev/null |
