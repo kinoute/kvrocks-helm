@@ -586,3 +586,87 @@ tests:
     asserts:
       - failedTemplate:
           errorMessage: "sidecars: the chart already has a container named fence"
+
+  # --- Memory: the block cache gets at most half the memory limit ---
+
+  - it: refuses a memory limit that the default block cache of Kvrocks would outgrow
+    set:
+      resources.limits.memory: 2Gi
+    asserts:
+      - failedTemplate:
+          errorMessage: "config.rocksdb.block_cache_size (4096 MB, Kvrocks' default) must be at most half of resources.limits.memory (2Gi): set it to 1024 or less. Kvrocks fills that cache on top of its write buffers, and a master killed for lack of memory hands nothing over"
+
+  - it: refuses a block cache larger than half the memory limit
+    set:
+      resources.limits.memory: 3Gi
+      config:
+        rocksdb.block_cache_size: 2048
+    asserts:
+      - failedTemplate:
+          errorMessage: "config.rocksdb.block_cache_size (2048 MB) must be at most half of resources.limits.memory (3Gi): set it to 1536 or less. Kvrocks fills that cache on top of its write buffers, and a master killed for lack of memory hands nothing over"
+
+  - it: accepts the block cache and memory limit the scenarios run with on a real cluster
+    set:
+      resources.limits.memory: 3Gi
+      config:
+        rocksdb.block_cache_size: 1024
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: accepts a block cache of exactly half the memory limit, given as a string
+    set:
+      resources.limits.memory: 1.5Gi
+      config:
+        rocksdb.block_cache_size: "768"
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: accepts the default block cache under a memory limit twice its size
+    set:
+      resources.limits.memory: 8Gi
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: reads a memory limit in decimal units
+    set:
+      resources.limits.memory: 4G
+      config:
+        rocksdb.block_cache_size: 1908
+    asserts:
+      - failedTemplate:
+          errorMessage: "config.rocksdb.block_cache_size (1908 MB) must be at most half of resources.limits.memory (4G): set it to 1907 or less. Kvrocks fills that cache on top of its write buffers, and a master killed for lack of memory hands nothing over"
+
+  - it: reads a memory limit given as a number of bytes
+    set:
+      resources.limits.memory: 4294967296
+      config:
+        rocksdb.block_cache_size: 2049
+    asserts:
+      - failedTemplate:
+          errorMessage: "config.rocksdb.block_cache_size (2049 MB) must be at most half of resources.limits.memory (4294967296): set it to 2048 or less. Kvrocks fills that cache on top of its write buffers, and a master killed for lack of memory hands nothing over"
+
+  - it: skips the check on a memory quantity it does not read rather than refuse it
+    set:
+      resources.limits.memory: "4e9"
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: does not check the block cache without a memory limit
+    set:
+      resources.requests.memory: 1Gi
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: accepts resources set to null
+    set:
+      resources: null
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: checks the block cache in standalone mode too
+    set:
+      architecture: standalone
+      resources.limits.memory: 2Gi
+    asserts:
+      - failedTemplate:
+          errorMessage: "config.rocksdb.block_cache_size (4096 MB, Kvrocks' default) must be at most half of resources.limits.memory (2Gi): set it to 1024 or less. Kvrocks fills that cache on top of its write buffers, and a master killed for lack of memory hands nothing over"

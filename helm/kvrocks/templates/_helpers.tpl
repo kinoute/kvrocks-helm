@@ -155,6 +155,26 @@ large integer as 2.68e+08; an unquoted YAML yes/no arrives as a boolean.
 {{- end }}
 
 {{/*
+A Kubernetes memory quantity in MiB, such as 3Gi, 3072Mi, 4G or a plain number of bytes.
+Prints nothing for a form it does not read, an exponent or milli-bytes for instance: the caller
+then skips its check rather than refuse a quantity Kubernetes accepts.
+Usage: include "kvrocks.memoryMiB" .Values.resources.limits.memory
+*/}}
+{{- define "kvrocks.memoryMiB" -}}
+{{- $bytesPerMiB := 1048576.0 }}
+{{- $bytesPerUnit := dict "" 1.0 "k" 1000.0 "M" 1000000.0 "G" 1000000000.0 "T" 1000000000000.0 "Ki" 1024.0 "Mi" 1048576.0 "Gi" 1073741824.0 "Ti" 1099511627776.0 }}
+{{- if or (kindIs "float64" .) (kindIs "int64" .) (kindIs "int" .) }}
+{{- divf (float64 .) $bytesPerMiB }}
+{{- else if regexMatch "^[0-9]+(\\.[0-9]+)?[A-Za-z]*$" (toString .) }}
+{{- $number := regexReplaceAll "[A-Za-z]+$" (toString .) "" }}
+{{- $unit := trimPrefix $number (toString .) }}
+{{- if hasKey $bytesPerUnit $unit }}
+{{- divf (mulf (float64 $number) (get $bytesPerUnit $unit)) $bytesPerMiB }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{/*
 Settings the chart writes itself; letting `config` override them would break the topology.
 And rename-command, which would hide from the chart's scripts the commands they rely on: with
 CLIENT renamed, the fencing could no longer pause the writes of an isolated master. And the
@@ -272,6 +292,26 @@ would slip a reserved setting past the check below. The namespace tokens are cre
 {{- range $key := splitList " " (include "kvrocks.reservedConfigKeys" .) }}
 {{- if hasKey $.Values.config $key }}
 {{- fail (printf "config.%s is managed by the chart and cannot be overridden" $key) }}
+{{- end }}
+{{- end }}
+{{- /*
+Kvrocks fills its block cache up to rocksdb.block_cache_size, 4 GB unless set, on top of its
+write buffers. Past the memory limit it is killed, and a master killed hands nothing over: the
+cache gets at most half the limit, the other half is for the write buffers and the connections.
+*/}}
+{{- $limits := get (.Values.resources | default dict) "limits" | default dict }}
+{{- $memoryLimit := get $limits "memory" }}
+{{- $limitMiB := include "kvrocks.memoryMiB" $memoryLimit }}
+{{- if and $memoryLimit $limitMiB }}
+{{- $kvrocksDefaultBlockCacheMiB := 4096 }}
+{{- $blockCacheIsSet := hasKey .Values.config "rocksdb.block_cache_size" }}
+{{- $blockCacheMiB := float64 (toString (index .Values.config "rocksdb.block_cache_size" | default $kvrocksDefaultBlockCacheMiB)) }}
+{{- $maxBlockCacheMiB := floor (divf (float64 $limitMiB) 2) }}
+{{- if gt $blockCacheMiB $maxBlockCacheMiB }}
+{{- $origin := ternary "" ", Kvrocks' default" $blockCacheIsSet }}
+{{- /* A limit in bytes reads as a number, which would print as 4.294967296e+09. */}}
+{{- $limitText := ternary (printf "%d" (int64 $memoryLimit)) (toString $memoryLimit) (kindIs "string" $memoryLimit | not) }}
+{{- fail (printf "config.rocksdb.block_cache_size (%d MB%s) must be at most half of resources.limits.memory (%s): set it to %d or less. Kvrocks fills that cache on top of its write buffers, and a master killed for lack of memory hands nothing over" (int64 $blockCacheMiB) $origin $limitText (int64 $maxBlockCacheMiB)) }}
 {{- end }}
 {{- end }}
 {{- if include "kvrocks.isReplication" . }}
