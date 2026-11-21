@@ -93,7 +93,7 @@ The chart is published to `oci://ghcr.io/kinoute/charts/kvrocks`, signed with co
    kubectl get pods -l app.kubernetes.io/instance=db
    ```
 
-4. Check that a write goes through.
+4. Check that a write goes through the write endpoint, reaches both replicas and is served by the read Service.
 
    ```bash
    helm test db

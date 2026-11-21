@@ -63,6 +63,76 @@ tests:
             name: WRITE_PORT
             value: "6380"
 
+  # --- Replicas and read Service ---
+
+  - it: waits for both replicas to hold the write
+    asserts:
+      - contains:
+          path: spec.containers[0].env
+          content:
+            name: REPLICAS
+            value: "2"
+      - matchRegex:
+          path: spec.containers[0].command[2]
+          pattern: 'write wait "\$REPLICAS" "\$WAIT_TIMEOUT_MS"'
+
+  - it: fails when a replica does not hold the write
+    asserts:
+      - matchRegex:
+          path: spec.containers[0].command[2]
+          pattern: 'the write reached \$\{acked:-no\} of the \$REPLICAS replicas" >&2\n\s+exit 1'
+
+  - it: reads the write back through the read Service
+    asserts:
+      - contains:
+          path: spec.containers[0].env
+          content:
+            name: READ_HOST
+            value: db-kvrocks-read
+      - contains:
+          path: spec.containers[0].env
+          content:
+            name: READ_PORT
+            value: "6379"
+      - matchRegex:
+          path: spec.containers[0].command[2]
+          pattern: 'cli "\$READ_HOST" "\$READ_PORT" get "\$key" \| grep -q ok'
+
+  - it: follows readService.port
+    set:
+      readService.port: 6390
+    asserts:
+      - contains:
+          path: spec.containers[0].env
+          content:
+            name: READ_PORT
+            value: "6390"
+
+  - it: skips the read Service when there is none
+    set:
+      readService.enabled: false
+    asserts:
+      - contains:
+          path: spec.containers[0].env
+          content:
+            name: READ_HOST
+            value: ""
+
+  - it: waits for no replica and reads no read Service in standalone mode
+    set:
+      architecture: standalone
+    asserts:
+      - contains:
+          path: spec.containers[0].env
+          content:
+            name: REPLICAS
+            value: "0"
+      - contains:
+          path: spec.containers[0].env
+          content:
+            name: READ_HOST
+            value: ""
+
   - it: runs redis-cli from the kvrocks image
     chart:
       appVersion: 9.9.9
