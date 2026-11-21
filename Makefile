@@ -82,8 +82,8 @@ loadgen: ## Lint, types and tests of the load generator used by the end-to-end s
 	cd $(LOADGEN) && uv run ruff format --check . && uv run ruff check .
 	cd $(LOADGEN) && uv run mypy loadgen.py dataset.py test_loadgen.py test_dataset.py && uv run pytest -q
 
-e2e: ## Every failure scenario on a local Kind cluster (needs docker, kind, kubectl, jq)
-	tests/e2e/run.sh
+e2e: ## Every failure scenario on a local Kind cluster, or SCENARIOS="install rolling_update ..." only
+	tests/e2e/run.sh $(SCENARIOS)
 
 e2e-quick: ## The handover, rolling update, master crash and TLS client scenarios only
 	tests/e2e/run.sh $(QUICK_SCENARIOS)

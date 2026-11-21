@@ -7,6 +7,13 @@ on:
   pull_request:
   # Runs every scenario on any branch, without a Kind cluster on a laptop.
   workflow_dispatch:
+    inputs:
+      scenarios:
+        description: >-
+          Scenarios to run instead, in order, on both Kubernetes versions. One can come
+          back several times, to chase a flaky one: install rolling_update rolling_update
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -78,8 +85,20 @@ jobs:
           curl -fsSLo "$RUNNER_TEMP/kind" "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64"
           sudo install "$RUNNER_TEMP/kind" /usr/local/bin/kind
       # docker, kubectl and jq ship with the runner image.
-      # A pull request gets the quick scenarios; main and release tags get all of them.
-      - run: make ${{ (github.event_name == 'pull_request' || matrix.quick-only) && 'e2e-quick' || 'e2e' }}
+      # A pull request gets the quick scenarios; main and release tags get all of them; a
+      # manual run, the scenarios it names.
+      - name: Run the scenarios
+        env:
+          SCENARIOS: ${{ inputs.scenarios }}
+          QUICK: ${{ github.event_name == 'pull_request' || matrix.quick-only }}
+        run: |
+          if [ -n "$SCENARIOS" ]; then
+            make e2e SCENARIOS="$SCENARIOS"
+          elif [ "$QUICK" = true ]; then
+            make e2e-quick
+          else
+            make e2e
+          fi
 
   # The load generator and the dataset, for the scenarios run on a real cluster, which cannot
   # load a local image as Kind does.
