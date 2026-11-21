@@ -13,9 +13,15 @@ sources:
   - https://github.com/apache/kvrocks
 keywords:
   - kvrocks
+  - apache-kvrocks
   - redis
-  - rocksdb
+  - redis-compatible
+  - redis-sentinel
   - sentinel
+  - haproxy
+  - rocksdb
+  - key-value
+  - database
   - high-availability
 icon: https://kvrocks.apache.org/img/logo.svg
 maintainers:

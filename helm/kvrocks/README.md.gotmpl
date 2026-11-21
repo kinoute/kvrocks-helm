@@ -41,11 +41,73 @@ For a release named `db`, with the default ports:
 | Reads, any ready pod (may be slightly stale) | `db-kvrocks-read:6379` |
 | Sentinel, for clients that speak it, not with TLS | `db-kvrocks-headless:26379` |
 
+## Connecting
+
+Any Redis client works with the write endpoint: one address and the password, as with a single Redis. It follows the master through failovers, so the client needs no Sentinel support.
+
+```python
+# redis-py
+import redis
+
+r = redis.Redis(host="db-kvrocks", port=6379, password=password)
+r.set("key", "value")
+```
+
+```go
+// go-redis
+rdb := redis.NewClient(&redis.Options{Addr: "db-kvrocks:6379", Password: password})
+```
+
+A client that speaks Sentinel can ask it for the master instead, with the same password for Sentinel and Kvrocks. Sentinel names the master by its pod name, which only resolves inside the cluster. Every client of the scenarios below goes through the write endpoint: Sentinel clients are not part of them.
+
+```python
+from redis.sentinel import Sentinel
+
+sentinel = Sentinel([("db-kvrocks-headless", 26379)],
+                    sentinel_kwargs={"password": password}, password=password)
+master = sentinel.master_for("kvrocks")
+```
+
+## What a failure costs
+
+Measured on 2026-11-16 with `make e2e`, on a Kind cluster of 3 workers in Docker Desktop with 4 CPUs. Four clients write as fast as they can through HAProxy, then every acknowledged key is read back from each pod. "Longest interruption" is the longest stretch without a single acknowledged write.
+
+| Event | Acknowledged writes | Lost | Longest interruption |
+| --- | ---: | ---: | ---: |
+| Rolling update | 498 323 | 0 | 3.4 s |
+| Drain of the master's node | 232 428 | 0 | 1.2 s |
+| Master pod deleted with `--force` | 102 386 | 0 | 2.8 s |
+| Replica volume lost | 187 268 | 0 | 0.8 s |
+| Master volume lost | 120 284 | 0 | 13.7 s |
+| Master's node killed | 253 049 | 4 | 16.5 s |
+| Master pod cut off from the network | 134 760 | 4 | 13.9 s |
+| Master cut off from the other pods only | 188 976 | 19 374 | 10.3 s |
+| Master's node killed with a replica of cluster DNS on it | 425 252 | 6 | 94.7 s |
+
+Replication is asynchronous: when the master dies, the writes it acknowledged in its last moments and had not replicated yet are gone. The 19 374 writes of the isolated master are the two seconds before the fencing sidecar paused it; without fencing, it would have taken writes for the whole partition. The 94.7 s come from Sentinel, which stalls on its DNS lookups to the dead replica of CoreDNS: keep cluster DNS off the nodes of the release. Every scenario, and the measurements on a real cluster, are in the [repository's README]({{ template "chart.homepage" . }}#what-a-failure-costs).
+
 ## Requirements
 
 - Kubernetes `{{ template "chart.kubeVersion" . }}`, the oldest version the end-to-end scenarios run on. Sentinel and the fencing loop run as native sidecars.
 - Three schedulable nodes with the default `podAntiAffinity: hard`: each Kvrocks pod needs a node of its own.
 - Kvrocks 2.16.0 or later in `replication` mode, the first version with `CLIENT PAUSE WRITE`.
 - A password without whitespace, double quotes or backslashes: HAProxy sends it in its health checks.
+- With a memory limit, a block cache of at most half of it. Kvrocks caches 4 GB of blocks unless `config` sets `rocksdb.block_cache_size`, and the chart refuses more than half the limit.
+
+## FAQ
+
+**Why does the install fail on `rocksdb.block_cache_size`?** The memory limit in `resources` is less than twice the block cache, 4096 MB unless set. Kvrocks fills that cache on top of its write buffers, and a master killed for lack of memory hands nothing over. Lower the cache in `config` to the number the error gives, or raise the limit.
+
+**Why `READONLY You can't write against a read only slave`?** The client writes to a replica, through the read Service or a pod name. Writes go to the write endpoint, `db-kvrocks`.
+
+**Do clients lose writes during a rolling update or a node drain?** Not an acknowledged one in the scenarios. The master pauses writes, waits until every replica Sentinel may promote holds them all, then hands its role over: clients wait about 3 s and reconnect once. One exception: Kvrocks does not pause `EXEC`, so a transaction whose `EXEC` arrives during that pause is dropped, with an empty reply. See the [caveats]({{ template "chart.homepage" . }}#caveats).
+
+**What does `helm test` check?** A write through the write endpoint, read back, held by both replicas according to the master (`WAIT`), then read through the read Service. "The write reached 1 of the 2 replicas" means a replica is down or not following the master.
+
+**Why exactly 3 pods?** It is the only count the failure scenarios run with. More pods would keep the handover's write pause across more Sentinels than was measured.
+
+**Can I run a hardened Kvrocks image?** Only one with a POSIX shell, `redis-cli` and the usual command-line tools, as the official image has: the chart's scripts run in the Kvrocks container. `image.registry`, `image.repository` and `image.digest` point to it.
+
+**Does the chart run Kvrocks in cluster mode?** No: one master and its replicas. Kvrocks keeps its data on disk, so a single master holds far more than its memory.
 
 {{ template "chart.valuesSection" . }}
