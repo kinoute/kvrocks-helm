@@ -32,6 +32,8 @@ TLS_DIR = "/tls"
 # Stretches without writes at least this long are listed with their time, to be matched
 # with what the scenario was doing.
 REPORTED_GAP_SECONDS = 1.0
+# Errors of one kind closer than this to the previous one belong to the same burst.
+ERROR_BURST_SECONDS = 1.0
 
 
 class KeyReader(Protocol):
@@ -49,6 +51,8 @@ class WorkerLog:
     acked_keys: list[str] = field(default_factory=list)
     ack_times: list[float] = field(default_factory=list)
     errors: dict[str, int] = field(default_factory=dict)
+    # (kind, monotonic time) of every failed write.
+    error_times: list[tuple[str, float]] = field(default_factory=list)
 
 
 def tls_options(check_hostname: bool) -> dict[str, object]:
@@ -104,6 +108,7 @@ def write_until(
         except redis.RedisError as error:
             kind = type(error).__name__
             log.errors[kind] = log.errors.get(kind, 0) + 1
+            log.error_times.append((kind, time.monotonic()))
             time.sleep(PAUSE_AFTER_ERROR_SECONDS)
             continue
         log.acked_keys.append(key)
@@ -126,6 +131,42 @@ def write_gaps(
     points = [started, *sorted(ack_times), ended]
     pairs = zip(points, points[1:], strict=False)
     return [(earlier, later - earlier) for earlier, later in pairs if later - earlier >= at_least]
+
+
+@dataclass
+class ErrorBurst:
+    """Failed writes of one kind, each within ERROR_BURST_SECONDS of the previous one."""
+
+    kind: str
+    start: float
+    end: float
+    count: int
+
+
+def error_bursts(error_times: Sequence[tuple[str, float]], within: float) -> list[ErrorBurst]:
+    """Groups the failed writes into bursts, in the order they started.
+
+    A count says how often an error happened, not when: the time of each burst is what
+    tells which step of the scenario it came from.
+    """
+    bursts: list[ErrorBurst] = []
+    open_burst_by_kind: dict[str, ErrorBurst] = {}
+    for kind, at in sorted(error_times, key=lambda error: error[1]):
+        burst = open_burst_by_kind.get(kind)
+        if burst is not None and at - burst.end <= within:
+            burst.end = at
+            burst.count += 1
+            continue
+        burst = ErrorBurst(kind=kind, start=at, end=at, count=1)
+        bursts.append(burst)
+        open_burst_by_kind[kind] = burst
+    return bursts
+
+
+def time_of_day(wall_clock_at_start: float, started: float, monotonic: float) -> str:
+    """Turns a monotonic time of the run into the UTC time of day, to the millisecond."""
+    moment = datetime.fromtimestamp(wall_clock_at_start + monotonic - started, UTC)
+    return moment.strftime("%H:%M:%S.%f")[:-3]
 
 
 def batches(keys: Sequence[str], size: int) -> Iterator[Sequence[str]]:
@@ -243,12 +284,20 @@ def main() -> None:
     ack_times = [t for log in logs for t in log.ack_times]
     gaps = [
         {
-            "at": datetime.fromtimestamp(wall_clock_at_start + start - started, UTC).strftime(
-                "%H:%M:%S"
-            ),
+            "at": time_of_day(wall_clock_at_start, started, start),
             "seconds": round(length, 2),
         }
         for start, length in write_gaps(ack_times, started, ended, REPORTED_GAP_SECONDS)
+    ]
+    error_times = [error for log in logs for error in log.error_times]
+    bursts = [
+        {
+            "error": burst.kind,
+            "at": time_of_day(wall_clock_at_start, started, burst.start),
+            "seconds": round(burst.end - burst.start, 3),
+            "count": burst.count,
+        }
+        for burst in error_bursts(error_times, ERROR_BURST_SECONDS)
     ]
     report = {
         "acked": len(acked_keys),
@@ -258,6 +307,7 @@ def main() -> None:
         "duration_seconds": round(ended - started, 2),
         "longest_write_gap_seconds": round(longest_write_gap(ack_times, started, ended), 2),
         "write_gaps": gaps,
+        "error_bursts": bursts,
     }
     print(json.dumps(report))
 
