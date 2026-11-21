@@ -195,17 +195,30 @@ scenario_plain_sentinel_failover() {
 
 # Every pod restarts in turn; the master hands over from its preStop hook.
 scenario_rolling_update() {
+  roll_every_pod rolling_update rolling
+}
+
+# The same, with the master on the pod the rollout restarts first. Sentinel may then hand the
+# role to the next pod to restart: up to three handovers in one rollout, the worst case for
+# writes. Scenario rolling_update only gets there when an earlier handover left the master on
+# that pod.
+scenario_rolling_update_from_last_pod() {
+  make_master "$((REPLICAS - 1))"
+  roll_every_pod rolling_update_from_last_pod rollinglast
+}
+
+roll_every_pod() { # $1: name of the scenario, $2: name of the load
   local report
-  start_load rolling
+  start_load "$2"
   k rollout restart "statefulset/$FULLNAME" >/dev/null
   k rollout status "statefulset/$FULLNAME" --timeout=600s >/dev/null ||
-    fail "rolling_update: the rollout did not finish"
+    fail "$1: the rollout did not finish"
   wait_healthy
   # Every container is new: any full sync they logged happened during this rollout.
   [ "$(count_full_syncs)" = "0" ] ||
-    fail "rolling_update: a replica copied the whole database again"
-  report=$(finish_load rolling)
-  assert_report rolling_update "$report" "$NO_LOSS" "$MAX_PLANNED_WRITE_GAP_SECONDS"
+    fail "$1: a replica copied the whole database again"
+  report=$(finish_load "$2")
+  assert_report "$1" "$report" "$NO_LOSS" "$MAX_PLANNED_WRITE_GAP_SECONDS"
 }
 
 # A Kubernetes upgrade, as a managed node pool runs it without a spare node: each node in
