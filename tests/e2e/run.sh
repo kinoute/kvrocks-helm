@@ -27,6 +27,7 @@ ALL_SCENARIOS=(
   handover_aborted_on_stop
   plain_sentinel_failover
   rolling_update
+  rolling_update_from_last_pod
   upgrade_with_new_scripts
   kvrocks_upgrade
   drain
@@ -65,6 +66,7 @@ CLUSTER_SCENARIOS=(
   switchover_with_sentinel_in_tilt
   plain_sentinel_failover
   rolling_update
+  rolling_update_from_last_pod
   upgrade_with_new_scripts
   kvrocks_upgrade
   haproxy_restart
